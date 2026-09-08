@@ -1,0 +1,195 @@
+/**
+ * SPDX-FileCopyrightText: 2026 DonkeyCat GmbH <office@donkeycat.com>
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ */
+
+#content.app-nomadtracks {
+	padding: 0;
+}
+
+#nomadtracks-app {
+	display: flex;
+	width: 100%;
+	height: 100%;
+	overflow: hidden;
+}
+
+/* ---- sidebar ---- */
+
+#nomadtracks-sidebar {
+	display: flex;
+	flex-direction: column;
+	width: 300px;
+	min-width: 220px;
+	flex-shrink: 0;
+	border-right: 1px solid var(--color-border);
+	background-color: var(--color-main-background);
+}
+
+#nomadtracks-tree {
+	flex: 1;
+	overflow-y: auto;
+	padding: 8px;
+}
+
+#nomadtracks-tree .nt-loading,
+#nomadtracks-tree .nt-empty-side {
+	color: var(--color-text-maxcontrast);
+	padding: 12px 8px;
+}
+
+.nt-root > h3 {
+	margin: 12px 4px 4px 4px;
+	font-size: 0.85em;
+	font-weight: bold;
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+	color: var(--color-text-maxcontrast);
+}
+
+.nt-root:first-child > h3 {
+	margin-top: 0;
+}
+
+.nt-children {
+	display: flex;
+	flex-direction: column;
+}
+
+details.nt-folder > .nt-children {
+	margin-left: 14px;
+	border-left: 1px solid var(--color-border);
+	padding-left: 4px;
+}
+
+details.nt-folder > summary {
+	cursor: pointer;
+	padding: 3px 6px;
+	border-radius: var(--border-radius);
+	font-weight: 500;
+}
+
+details.nt-folder > summary:hover {
+	background-color: var(--color-background-hover);
+}
+
+.nt-item {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	width: 100%;
+	margin: 0;
+	padding: 4px 6px;
+	border: none;
+	background: transparent;
+	border-radius: var(--border-radius);
+	text-align: left;
+	font-size: 0.95em;
+	color: var(--color-main-text);
+	cursor: pointer;
+}
+
+.nt-item:hover {
+	background-color: var(--color-background-hover);
+}
+
+.nt-item.nt-active {
+	background-color: var(--color-primary-element-light);
+}
+
+.nt-item.nt-failed {
+	opacity: 0.5;
+}
+
+.nt-dot {
+	flex: none;
+	width: 10px;
+	height: 10px;
+	border-radius: 50%;
+	background-color: var(--color-text-maxcontrast);
+}
+
+.nt-item-map .nt-dot,
+.nt-item-route .nt-dot {
+	border-radius: 2px;
+}
+
+.nt-label {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+#nomadtracks-sidebar-footer {
+	flex: none;
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	padding: 10px;
+	border-top: 1px solid var(--color-border);
+	font-size: 0.9em;
+	color: var(--color-text-maxcontrast);
+}
+
+.nt-button {
+	padding: 6px 12px;
+	border-radius: var(--border-radius-pill, 20px);
+	border: 1px solid var(--color-border-dark);
+	background-color: var(--color-main-background);
+	color: var(--color-main-text);
+	cursor: pointer;
+}
+
+.nt-button:hover {
+	background-color: var(--color-background-hover);
+}
+
+/* ---- map area ---- */
+
+#nomadtracks-main {
+	position: relative;
+	flex: 1;
+	min-width: 0;
+}
+
+#nomadtracks-map {
+	position: absolute;
+	inset: 0;
+}
+
+.nt-empty {
+	position: absolute;
+	inset: 0;
+	z-index: 5;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	text-align: center;
+	padding: 24px;
+	background-color: var(--color-main-background);
+}
+
+.nt-empty h2 {
+	margin-bottom: 12px;
+}
+
+.nt-empty p {
+	max-width: 480px;
+	color: var(--color-text-maxcontrast);
+	margin: 4px 0;
+}
+
+#nomadtracks-toast {
+	position: absolute;
+	bottom: 24px;
+	left: 50%;
+	transform: translateX(-50%);
+	z-index: 10;
+	max-width: 80%;
+	padding: 10px 16px;
+	border-radius: var(--border-radius-large, 10px);
+	background-color: var(--color-main-background);
+	color: var(--color-main-text);
+	box-shadow: 0 2px 9px var(--color-box-shadow);
+}
