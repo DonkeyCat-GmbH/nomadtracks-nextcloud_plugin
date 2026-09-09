@@ -1,4 +1,5 @@
 # NomadTracks for Nextcloud
+*test*
 
 A read-only web viewer for the library that the NomadTracks mobile app
 (iOS / Android) syncs into the `NomadTracks/` folder of your Nextcloud
