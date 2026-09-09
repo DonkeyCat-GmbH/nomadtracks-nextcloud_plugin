@@ -25,7 +25,7 @@ The base map is loaded from map.nomadtracks.app.]]></description>
 	<website>https://git.donkeyserver.eu/marco/nomadtracks-nextcloud_plugin</website>
 	<bugs>https://git.donkeyserver.eu/marco/nomadtracks-nextcloud_plugin/issues</bugs>
 	<dependencies>
-		<nextcloud min-version="28" max-version="31"/>
+		<nextcloud min-version="28" max-version="34"/>
 	</dependencies>
 	<navigations>
 		<navigation>

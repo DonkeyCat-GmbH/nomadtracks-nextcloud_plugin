@@ -44,7 +44,6 @@ class PageController extends Controller {
 		$csp->addAllowedImageDomain('https://map.nomadtracks.app');
 		// MapLibre GL spawns its worker from a blob: URL.
 		$csp->addAllowedWorkerSrcDomain('blob:');
-		$csp->addAllowedChildSrcDomain('blob:');
 		$response->setContentSecurityPolicy($csp);
 
 		return $response;
