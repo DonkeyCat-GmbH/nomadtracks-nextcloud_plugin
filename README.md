@@ -24,6 +24,10 @@ files.
 - **Click a track row** (not its checkbox) to select it: it is ticked
   if it wasn't, highlighted on the map, zoomed to, and its details
   open on the right.
+- **Hovering the elevation profile** in a track's details puts a dot
+  on the map at that point of the track, in the track's own colour —
+  the chart scrubber the mobile app's track detail has. Moving off
+  the chart removes the dot.
 - **All POIs** are placed as markers when the page loads. Click a
   marker or its tree row for its details.
 - **Click a route** (`.nomadroute` package) to draw the route line and

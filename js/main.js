@@ -51,6 +51,8 @@
 	const sidecarPaths = new Set();
 	let selectedItem = null;
 	let selectedFeature = null;
+	/** Where the chart scrubber currently points, or null. */
+	let cursorFeature = null;
 	let routeMarkers = [];
 	let userMovedMap = false;
 
@@ -372,6 +374,7 @@
 			mapReady = true;
 			refreshTrackSource();
 			pushSelectedFeature();
+			pushCursorFeature();
 		});
 	}
 
@@ -403,6 +406,21 @@
 			layout: { 'line-join': 'round', 'line-cap': 'round' },
 			paint: { 'line-color': ['get', 'color'], 'line-width': 4 },
 		});
+		// Chart scrubber dot, styled like the app's `nomad-cursor`
+		// layer: the track's own colour inside a white ring. Added
+		// last so it sits above every line.
+		map.addSource('nt-cursor', { type: 'geojson', data: EMPTY_FC });
+		map.addLayer({
+			id: 'nt-cursor-dot',
+			type: 'circle',
+			source: 'nt-cursor',
+			paint: {
+				'circle-radius': 6.5,
+				'circle-color': ['get', 'color'],
+				'circle-stroke-color': '#ffffff',
+				'circle-stroke-width': 2.5,
+			},
+		});
 	}
 
 	/**
@@ -426,6 +444,10 @@
 
 	function setSelectedFeature(feature) {
 		selectedFeature = feature || null;
+		// A stale dot from the previously scrubbed track would sit on
+		// the map with nothing pointing at it.
+		cursorFeature = null;
+		pushCursorFeature();
 		for (const m of routeMarkers) {
 			m.remove();
 		}
@@ -440,6 +462,34 @@
 		map.getSource('nt-selected').setData(
 			selectedFeature
 				? { type: 'FeatureCollection', features: [selectedFeature] }
+				: EMPTY_FC
+		);
+	}
+
+	/**
+	 * Move the chart-scrubber dot to `sample` (a profile sample, which
+	 * carries the lat/lon it was measured at), or clear it with null.
+	 * `color` paints the dot in the scrubbed track's own colour.
+	 */
+	function setCursorSample(sample, color) {
+		cursorFeature = sample
+			&& Number.isFinite(sample.lat) && Number.isFinite(sample.lon)
+			? {
+				type: 'Feature',
+				geometry: { type: 'Point', coordinates: [sample.lon, sample.lat] },
+				properties: { color: color || F.DEFAULT_TRACK_COLOR },
+			}
+			: null;
+		pushCursorFeature();
+	}
+
+	function pushCursorFeature() {
+		if (!mapReady) {
+			return;
+		}
+		map.getSource('nt-cursor').setData(
+			cursorFeature
+				? { type: 'FeatureCollection', features: [cursorFeature] }
 				: EMPTY_FC
 		);
 	}
@@ -584,7 +634,15 @@
 		const samples = [];
 		for (let i = 0; i < points.length; i++) {
 			if (Number.isFinite(points[i].altitude)) {
-				samples.push({ d: cumulative[i], a: points[i].altitude });
+				// lat/lon ride along so scrubbing the chart can put a
+				// dot at that point on the map (the app's chart
+				// scrubber).
+				samples.push({
+					d: cumulative[i],
+					a: points[i].altitude,
+					lat: points[i].lat,
+					lon: points[i].lon,
+				});
 			}
 		}
 		return samples.length >= 2 ? samples : [];
@@ -975,7 +1033,9 @@
 			body.appendChild(grid);
 		}
 
-		const profile = elevationProfile(d.profile);
+		const profile = elevationProfile(d.profile, function (sample) {
+			setCursorSample(sample, item.color);
+		});
 		if (profile) {
 			const section = addSection(body, tr('Elevation profile'));
 			section.appendChild(profile);
@@ -1065,7 +1125,7 @@
 	 * would block anyway. Returns null when the file has no usable
 	 * elevation data.
 	 */
-	function elevationProfile(samples) {
+	function elevationProfile(samples, onScrub) {
 		if (!samples || samples.length < 2) {
 			return null;
 		}
@@ -1197,11 +1257,17 @@
 			dot.setAttribute('cy', y(s.a));
 			dot.setAttribute('visibility', 'visible');
 			readout.textContent = S.formatDistance(s.d) + ' · ' + S.formatElevation(s.a);
+			if (onScrub) {
+				onScrub(s);
+			}
 		});
 		svg.addEventListener('pointerleave', function () {
 			cursor.setAttribute('visibility', 'hidden');
 			dot.setAttribute('visibility', 'hidden');
 			readout.textContent = ' ';
+			if (onScrub) {
+				onScrub(null);
+			}
 		});
 
 		return wrap;
