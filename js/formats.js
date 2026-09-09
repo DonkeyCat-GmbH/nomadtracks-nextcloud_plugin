@@ -26,10 +26,98 @@
 	/** Default polyline color when no sidecar / metadata color exists. */
 	const DEFAULT_TRACK_COLOR = '#1E88E5';
 
+	/** Text of the first descendant element with this local name. */
+	function firstText(el, localName) {
+		if (!el) {
+			return '';
+		}
+		const hits = el.getElementsByTagNameNS('*', localName);
+		return hits.length > 0 ? (hits[0].textContent || '').trim() : '';
+	}
+
+	/** Text of the first *direct child* with this local name. */
+	function childText(el, localName) {
+		for (let n = el.firstElementChild; n; n = n.nextElementSibling) {
+			if (n.localName === localName) {
+				return (n.textContent || '').trim();
+			}
+		}
+		return '';
+	}
+
+	/** ISO-8601 `<time>` → epoch seconds, or undefined. */
+	function parseTimeSeconds(text) {
+		if (!text) {
+			return undefined;
+		}
+		const ms = Date.parse(text);
+		return Number.isFinite(ms) ? ms / 1000 : undefined;
+	}
+
 	/**
-	 * Parse a GPX document string.
-	 * Returns { name, segments: [ [ [lon, lat], … ], … ],
-	 *           waypoints: [ { lon, lat, name } ] } or null.
+	 * `<gpxtrkx:TrackStatsExtension>` — the pre-computed totals some
+	 * source apps (Bergfex et al.) embed. The mobile app prefers these
+	 * over its own re-derivation, per field, so this viewer reads them
+	 * for the same reason: on already-smoothed altitudes a fresh pass
+	 * through the noise-rejection filter would under-report against
+	 * what the source app (and therefore the app's own UI) shows.
+	 * Returns null when the block is absent.
+	 */
+	function parseTrackStatsExtension(trkEl) {
+		if (!trkEl) {
+			return null;
+		}
+		const blocks = trkEl.getElementsByTagNameNS('*', 'TrackStatsExtension');
+		if (blocks.length === 0) {
+			return null;
+		}
+		const fields = {
+			Distance: 'distanceMeters',
+			Ascent: 'ascentMeters',
+			Descent: 'descentMeters',
+			TotalElapsedTime: 'totalElapsedSeconds',
+			MovingTime: 'movingSeconds',
+			MaxSpeed: 'maxSpeedMetersPerSecond',
+			MovingSpeed: 'movingSpeedMetersPerSecond',
+			MinElevation: 'minElevationMeters',
+			MaxElevation: 'maxElevationMeters',
+		};
+		const out = { hasTrustedFields: false };
+		for (let n = blocks[0].firstElementChild; n; n = n.nextElementSibling) {
+			const key = fields[n.localName];
+			if (!key) {
+				continue;
+			}
+			const value = parseFloat((n.textContent || '').trim());
+			if (!Number.isFinite(value)) {
+				continue;
+			}
+			out[key] = value;
+			// Only Ascent / Descent mark the block authoritative —
+			// mirrors `GPXImporter.applySourceStatsField`.
+			if (n.localName === 'Ascent' || n.localName === 'Descent') {
+				out.hasTrustedFields = true;
+			}
+		}
+		return out;
+	}
+
+	/**
+	 * Parse a GPX document string. Returns null on malformed input or
+	 * when the document carries neither a track nor a waypoint.
+	 *
+	 * {
+	 *   name,                              // <trk><name>, else <metadata><name>
+	 *   description,                       // <trk><desc>, else <metadata><desc>
+	 *   segments:      [ [ [lon, lat], … ] ],       // map geometry
+	 *   pointSegments: [ [ { lat, lon, altitude?, timestamp?, hr? } ] ],
+	 *   waypoints:     [ { lon, lat, name } ],
+	 *   sourceStats:   { … } | null        // <gpxtrkx:TrackStatsExtension>
+	 * }
+	 *
+	 * `timestamp` is epoch **seconds** and `hr` comes from Garmin's
+	 * `<gpxtpx:TrackPointExtension><gpxtpx:hr>`; both are omitted when
+	 * the point does not carry them. No value is ever invented.
 	 */
 	function parseGpx(text) {
 		let doc;
@@ -43,19 +131,38 @@
 		}
 
 		const segments = [];
+		const pointSegments = [];
 		const segEls = doc.getElementsByTagNameNS('*', 'trkseg');
 		for (let i = 0; i < segEls.length; i++) {
 			const pts = [];
+			const detailed = [];
 			const ptEls = segEls[i].getElementsByTagNameNS('*', 'trkpt');
 			for (let j = 0; j < ptEls.length; j++) {
-				const lat = parseFloat(ptEls[j].getAttribute('lat'));
-				const lon = parseFloat(ptEls[j].getAttribute('lon'));
-				if (Number.isFinite(lat) && Number.isFinite(lon)) {
-					pts.push([lon, lat]);
+				const el = ptEls[j];
+				const lat = parseFloat(el.getAttribute('lat'));
+				const lon = parseFloat(el.getAttribute('lon'));
+				if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+					continue;
 				}
+				pts.push([lon, lat]);
+				const point = { lat: lat, lon: lon };
+				const ele = parseFloat(childText(el, 'ele'));
+				if (Number.isFinite(ele)) {
+					point.altitude = ele;
+				}
+				const ts = parseTimeSeconds(childText(el, 'time'));
+				if (ts !== undefined) {
+					point.timestamp = ts;
+				}
+				const hr = parseFloat(firstText(el, 'hr'));
+				if (Number.isFinite(hr)) {
+					point.hr = hr;
+				}
+				detailed.push(point);
 			}
 			if (pts.length > 1) {
 				segments.push(pts);
+				pointSegments.push(detailed);
 			}
 		}
 
@@ -75,19 +182,32 @@
 			waypoints.push({ lon: lon, lat: lat, name: name });
 		}
 
-		let name = '';
 		const trkEls = doc.getElementsByTagNameNS('*', 'trk');
-		if (trkEls.length > 0) {
-			const nameEls = trkEls[0].getElementsByTagNameNS('*', 'name');
-			if (nameEls.length > 0) {
-				name = (nameEls[0].textContent || '').trim();
-			}
-		}
+		const trk = trkEls.length > 0 ? trkEls[0] : null;
+		const metaEls = doc.getElementsByTagNameNS('*', 'metadata');
+		const meta = metaEls.length > 0 ? metaEls[0] : null;
+
+		// `<trk>` wins over `<metadata>` for both fields: that is the
+		// precedence the app's importer applies (metadata name is only
+		// a fallback for a track without its own).
+		const name = (trk ? childText(trk, 'name') : '')
+			|| (meta ? childText(meta, 'name') : '');
+		// The app exports notes as `<metadata><desc>` and imports them
+		// from `<trk><desc>`, so both spellings occur in the wild.
+		const description = (trk ? childText(trk, 'desc') : '')
+			|| (meta ? childText(meta, 'desc') : '');
 
 		if (segments.length === 0 && waypoints.length === 0) {
 			return null;
 		}
-		return { name: name, segments: segments, waypoints: waypoints };
+		return {
+			name: name,
+			description: description,
+			segments: segments,
+			pointSegments: pointSegments,
+			waypoints: waypoints,
+			sourceStats: parseTrackStatsExtension(trk),
+		};
 	}
 
 	/**
@@ -122,9 +242,21 @@
 		return {
 			lon: coords[0],
 			lat: coords[1],
+			// The exporter appends altitude as the third coordinate
+			// when the POI has one; it is absent otherwise.
+			altitude: coords.length > 2 && Number.isFinite(coords[2]) ? coords[2] : null,
 			name: typeof props.name === 'string' ? props.name : '',
 			color: normalizeColor(props.color),
 			category: typeof props.category === 'string' ? props.category : '',
+			categoryDisplayName: typeof props.categoryDisplayName === 'string'
+				? props.categoryDisplayName : '',
+			notes: typeof props.notes === 'string' ? props.notes : '',
+			createdAt: typeof props.createdAt === 'string' ? props.createdAt : '',
+			horizontalAccuracy: typeof props.horizontalAccuracy === 'number'
+				? props.horizontalAccuracy : null,
+			folder: typeof props.folder === 'string' ? props.folder : '',
+			folderPath: typeof props.folderPath === 'string' ? props.folderPath : '',
+			source: typeof props.source === 'string' ? props.source : '',
 			isVisibleOnMap: props.isVisibleOnMap !== false,
 		};
 	}
@@ -157,7 +289,32 @@
 			notes: typeof root.notes === 'string' ? root.notes : null,
 			profileRaw: typeof root.profileRaw === 'string' ? root.profileRaw : null,
 			isLoop: typeof root.isLoop === 'boolean' ? root.isLoop : null,
+			address: parseAddress(root.address),
+			photoCount: Array.isArray(root.photos) ? root.photos.length : null,
+			device: typeof root.device === 'string' ? root.device : null,
 		};
+	}
+
+	/**
+	 * The sidecar's `address` block (§3.1) — the reverse-geocoded start
+	 * location the app shows under "Start Location". Returns null when
+	 * absent or when every component is empty.
+	 */
+	function parseAddress(value) {
+		if (!value || typeof value !== 'object') {
+			return null;
+		}
+		const keys = ['street', 'city', 'postalCode', 'region', 'country'];
+		const out = {};
+		let any = false;
+		for (const key of keys) {
+			const v = typeof value[key] === 'string' ? value[key].trim() : '';
+			out[key] = v;
+			if (v !== '') {
+				any = true;
+			}
+		}
+		return any ? out : null;
 	}
 
 	/**
