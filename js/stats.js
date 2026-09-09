@@ -1,0 +1,477 @@
+/**
+ * SPDX-FileCopyrightText: 2026 DonkeyCat GmbH <office@donkeycat.com>
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Track metrics for the web viewer — a faithful JavaScript port of the
+ * mobile app's shared numerics so the numbers on this page match the
+ * numbers in the app for the same file:
+ *
+ *   - `elevationStats(points)`  ← NomadTracksShared/ElevationStats.swift
+ *     (`ElevationStats.computeWithReference`): vertical-accuracy gate →
+ *     cadence-widened time-windowed median → threshold hysteresis with a
+ *     noise-scaled deadband.
+ *   - `trackStats(...)`         ← NomadTracks/Models/TrackStats.swift
+ *     (`TrackStats.compute`): max / average / average-moving speed,
+ *     moving time, altitude extremes, heart-rate aggregates.
+ *   - `totalDistance(points)`   ← Geo.distance summed over the polyline
+ *     (WGS84 sphere, R = 6 371 000 m).
+ *   - the `format*` helpers     ← NomadTracksShared/LiveStatFormatting.swift,
+ *     metric branch only (this page has no unit-system setting).
+ *
+ * Pure functions, no DOM: the file loads both as a browser script
+ * (`window.NomadTracks.stats`) and as a CommonJS module, which is how
+ * `tests/elevation-smoke.js` exercises the elevation port under Node.
+ */
+(function (root, factory) {
+	'use strict';
+	const api = factory();
+	if (typeof module === 'object' && module && module.exports) {
+		module.exports = api;
+	} else {
+		const NT = (root.NomadTracks = root.NomadTracks || {});
+		NT.stats = api;
+	}
+})(typeof self !== 'undefined' ? self : this, function () {
+	'use strict';
+
+	// ---- ElevationStats.Defaults (verbatim mirror) -----------------
+
+	const ELEVATION_DEFAULTS = {
+		/** Hysteresis deadband in metres. */
+		thresholdMeters: 0.5,
+		/** Median window width in seconds. */
+		timeConstantSeconds: 18,
+		/** Minimum samples the median window must span. */
+		minimumSamplesPerWindow: 9,
+		/** Deadband stand-off factor over the measured noise. */
+		noiseDeadbandFactor: 2,
+		/** Samples with a real accuracy worse than this are dropped. */
+		maxVerticalAccuracyMeters: 15,
+	};
+
+	function ascending(a, b) {
+		return a - b;
+	}
+
+	/**
+	 * Median gap between consecutive samples — the recording's real
+	 * cadence. Median, not mean, so one pause can't drag it away from
+	 * what the sampler is actually doing.
+	 */
+	function medianSampleInterval(timestamps) {
+		if (timestamps.length <= 1) {
+			return 0;
+		}
+		const gaps = [];
+		for (let i = 1; i < timestamps.length; i++) {
+			const dt = timestamps[i] - timestamps[i - 1];
+			if (dt > 0) {
+				gaps.push(dt);
+			}
+		}
+		if (gaps.length === 0) {
+			return 0;
+		}
+		gaps.sort(ascending);
+		return gaps[Math.floor(gaps.length / 2)];
+	}
+
+	/** Median |raw − smoothed|: a robust estimate of altitude noise. */
+	function medianResidual(raw, smoothed) {
+		if (raw.length !== smoothed.length || raw.length === 0) {
+			return 0;
+		}
+		const residuals = new Array(raw.length);
+		for (let i = 0; i < raw.length; i++) {
+			residuals[i] = Math.abs(raw[i] - smoothed[i]);
+		}
+		residuals.sort(ascending);
+		return residuals[Math.floor(residuals.length / 2)];
+	}
+
+	/**
+	 * Replaces each altitude with the median of every sample whose
+	 * timestamp falls within ±windowSeconds/2 of it. Two-pointer sweep,
+	 * exactly as in the Swift original; `windowSeconds <= 0` is a
+	 * pass-through.
+	 */
+	function medianSmoothed(altitudes, timestamps, windowSeconds) {
+		const n = altitudes.length;
+		if (n === 0 || !(windowSeconds > 0)) {
+			return altitudes.slice();
+		}
+		const half = windowSeconds / 2;
+		const out = new Array(n);
+		let lo = 0;
+		let hi = 0;
+		for (let i = 0; i < n; i++) {
+			const lower = timestamps[i] - half;
+			const upper = timestamps[i] + half;
+			while (lo < n && timestamps[lo] < lower) {
+				lo++;
+			}
+			if (hi < lo) {
+				hi = lo;
+			}
+			while (hi < n && timestamps[hi] <= upper) {
+				hi++;
+			}
+			if (hi <= lo) {
+				out[i] = altitudes[i];
+				continue;
+			}
+			const window = altitudes.slice(lo, hi).sort(ascending);
+			const m = window.length;
+			out[i] = m % 2 === 1
+				? window[(m - 1) / 2]
+				: (window[m / 2 - 1] + window[m / 2]) / 2;
+		}
+		return out;
+	}
+
+	/**
+	 * Elevation gain / loss through the app's three-stage filter.
+	 *
+	 * `points` is an array of `{ altitude, timestamp, verticalAccuracy }`
+	 * (seconds for the timestamp; `verticalAccuracy` may be omitted —
+	 * GPX carries none, and the gate only ever fires on a real,
+	 * positive accuracy estimate, exactly like the app).
+	 *
+	 * Returns `{ gain, loss, reference, smoothed, lastTimestamp }` in
+	 * metres, mirroring `ElevationStats.computeWithReference`.
+	 */
+	function elevationStats(points, options) {
+		const opts = options || {};
+		const threshold = typeof opts.threshold === 'number'
+			? opts.threshold
+			: ELEVATION_DEFAULTS.thresholdMeters;
+		const timeConstantSeconds = typeof opts.timeConstantSeconds === 'number'
+			? opts.timeConstantSeconds
+			: ELEVATION_DEFAULTS.timeConstantSeconds;
+
+		if (!points || points.length === 0) {
+			return { gain: 0, loss: 0, reference: null, smoothed: null, lastTimestamp: null };
+		}
+		const firstPoint = points[0];
+
+		// Stage 1 — vertical-accuracy gate. An accuracy is only
+		// "known" when strictly positive (CoreLocation reports a
+		// negative value with no altitude fix; GPX has none at all),
+		// so the gate never rejects imported data.
+		let altitudes = [];
+		let timestamps = [];
+		for (let i = 0; i < points.length; i++) {
+			const acc = typeof points[i].verticalAccuracy === 'number'
+				? points[i].verticalAccuracy
+				: -1;
+			if (acc > 0 && acc > ELEVATION_DEFAULTS.maxVerticalAccuracyMeters) {
+				continue;
+			}
+			altitudes.push(points[i].altitude);
+			timestamps.push(points[i].timestamp);
+		}
+		// Gate left too little to work with → fall back to the ungated
+		// signal rather than report a spurious zero.
+		if (altitudes.length < 2) {
+			altitudes = points.map(function (p) { return p.altitude; });
+			timestamps = points.map(function (p) { return p.timestamp; });
+		}
+
+		// Stage 2 — time-windowed median, widened so the window always
+		// holds `minimumSamplesPerWindow` samples whatever the cadence.
+		const cadence = medianSampleInterval(timestamps);
+		const windowSeconds = Math.max(
+			Math.max(0, timeConstantSeconds),
+			cadence * ELEVATION_DEFAULTS.minimumSamplesPerWindow
+		);
+		const smoothedSeries = medianSmoothed(altitudes, timestamps, windowSeconds);
+
+		// Stage 3a — stand the deadband off the noise the smoothing
+		// could not explain. Zero on a clean recording, so the 0.5 m
+		// floor applies unchanged there.
+		const effectiveThreshold = Math.max(
+			threshold,
+			ELEVATION_DEFAULTS.noiseDeadbandFactor * medianResidual(altitudes, smoothedSeries)
+		);
+
+		if (smoothedSeries.length === 0) {
+			return {
+				gain: 0,
+				loss: 0,
+				reference: firstPoint.altitude,
+				smoothed: firstPoint.altitude,
+				lastTimestamp: firstPoint.timestamp,
+			};
+		}
+
+		// Stage 3b — threshold hysteresis on the smoothed signal.
+		let reference = smoothedSeries[0];
+		let smoothed = smoothedSeries[0];
+		let lastTimestamp = timestamps[0];
+		let gain = 0;
+		let loss = 0;
+		for (let i = 1; i < smoothedSeries.length; i++) {
+			smoothed = smoothedSeries[i];
+			lastTimestamp = timestamps[i];
+			const delta = smoothed - reference;
+			if (delta >= effectiveThreshold) {
+				gain += delta;
+				reference = smoothed;
+			} else if (delta <= -effectiveThreshold) {
+				loss += -delta;
+				reference = smoothed;
+			}
+			// Inside ±threshold the sample is noise: do not commit and
+			// do NOT advance the reference, so a sustained drift keeps
+			// building toward the threshold across samples.
+		}
+		return {
+			gain: gain,
+			loss: loss,
+			reference: reference,
+			smoothed: smoothed,
+			lastTimestamp: lastTimestamp,
+		};
+	}
+
+	// ---- Geo.distance ---------------------------------------------
+
+	const EARTH_RADIUS_METERS = 6371000;
+
+	/** Great-circle distance in metres between two {lat, lon} points. */
+	function distance(a, b) {
+		const rad = Math.PI / 180;
+		const lat1 = a.lat * rad;
+		const lat2 = b.lat * rad;
+		const dLat = (b.lat - a.lat) * rad;
+		const dLon = (b.lon - a.lon) * rad;
+		const h = Math.sin(dLat / 2) * Math.sin(dLat / 2)
+			+ Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+		const c = 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+		return EARTH_RADIUS_METERS * c;
+	}
+
+	/** Sum of great-circle distances between consecutive points. */
+	function totalDistance(points) {
+		let sum = 0;
+		for (let i = 1; i < points.length; i++) {
+			sum += distance(points[i - 1], points[i]);
+		}
+		return sum;
+	}
+
+	/** Cumulative distance in metres at each point (first is 0). */
+	function cumulativeDistance(points) {
+		const out = new Array(points.length);
+		let sum = 0;
+		for (let i = 0; i < points.length; i++) {
+			if (i > 0) {
+				sum += distance(points[i - 1], points[i]);
+			}
+			out[i] = sum;
+		}
+		return out;
+	}
+
+	// ---- TrackStats.compute ---------------------------------------
+
+	/** Below this segment speed (m/s) a segment counts as a pause. */
+	const MOVING_SPEED_THRESHOLD_MPS = 0.5;
+
+	/**
+	 * Port of `TrackStats.compute`. `points` are
+	 * `{ lat, lon, altitude?, timestamp?, speed?, hr? }`; `distanceMeters`
+	 * and `durationSeconds` are the track summary values (see
+	 * `totalDistance` / first-to-last timestamp).
+	 *
+	 * Every field is `null` when it cannot be derived — the caller omits
+	 * the row rather than printing a placeholder.
+	 */
+	function trackStats(points, distanceMeters, durationSeconds) {
+		const empty = {
+			maxSpeedMps: null,
+			avgSpeedMps: null,
+			avgMovingSpeedMps: null,
+			movingTimeSeconds: null,
+			maxAltitudeMeters: null,
+			minAltitudeMeters: null,
+			avgHeartRateBpm: null,
+			maxHeartRateBpm: null,
+			minHeartRateBpm: null,
+		};
+		if (!points || points.length === 0) {
+			return empty;
+		}
+		const hr = heartRateStats(points);
+
+		const first = points[0];
+		let maxSpeed = -1;
+		let minAlt = Number.isFinite(first.altitude) ? first.altitude : null;
+		let maxAlt = minAlt;
+		if (typeof first.speed === 'number' && first.speed >= 0) {
+			maxSpeed = first.speed;
+		}
+		let movingTime = 0;
+		let haveTiming = false;
+
+		for (let i = 1; i < points.length; i++) {
+			const prev = points[i - 1];
+			const cur = points[i];
+
+			// Altitude extremes — every sample participates, so an
+			// outlier at either end is preserved (smoothing here would
+			// hide the actual peak / trough the user reached).
+			if (Number.isFinite(cur.altitude)) {
+				if (minAlt === null || cur.altitude < minAlt) {
+					minAlt = cur.altitude;
+				}
+				if (maxAlt === null || cur.altitude > maxAlt) {
+					maxAlt = cur.altitude;
+				}
+			}
+
+			// Effective segment speed: the GPS-reported value when
+			// valid, otherwise inferred from the position / time delta.
+			if (!Number.isFinite(prev.timestamp) || !Number.isFinite(cur.timestamp)) {
+				continue;
+			}
+			haveTiming = true;
+			const dt = cur.timestamp - prev.timestamp;
+			const segmentDistance = distance(prev, cur);
+			const inferred = dt > 0.001 ? segmentDistance / dt : 0;
+			const reported = typeof cur.speed === 'number' ? cur.speed : -1;
+			const effective = reported >= 0 ? reported : inferred;
+			if (effective > maxSpeed) {
+				maxSpeed = effective;
+			}
+			if (dt > 0 && effective >= MOVING_SPEED_THRESHOLD_MPS) {
+				movingTime += dt;
+			}
+		}
+
+		const avgSpeed = durationSeconds > 0 ? distanceMeters / durationSeconds : null;
+		const avgMovingSpeed = movingTime > 0 ? distanceMeters / movingTime : null;
+
+		return {
+			maxSpeedMps: maxSpeed >= 0 ? maxSpeed : null,
+			avgSpeedMps: avgSpeed,
+			avgMovingSpeedMps: avgMovingSpeed,
+			movingTimeSeconds: haveTiming && movingTime > 0 ? movingTime : null,
+			maxAltitudeMeters: maxAlt,
+			minAltitudeMeters: minAlt,
+			avgHeartRateBpm: hr.avg,
+			maxHeartRateBpm: hr.max,
+			minHeartRateBpm: hr.min,
+		};
+	}
+
+	/**
+	 * Mean / max / min heart rate over the points that carry an `hr`
+	 * value. Non-positive readings are the codec's "no reading"
+	 * sentinel and are ignored, as in `TrackStats.heartRateStats`.
+	 */
+	function heartRateStats(points) {
+		const bpms = [];
+		for (let i = 0; i < points.length; i++) {
+			const bpm = points[i].hr;
+			if (typeof bpm === 'number' && bpm > 0) {
+				bpms.push(bpm);
+			}
+		}
+		if (bpms.length === 0) {
+			return { avg: null, max: null, min: null };
+		}
+		let total = 0;
+		let max = bpms[0];
+		let min = bpms[0];
+		for (let i = 0; i < bpms.length; i++) {
+			total += bpms[i];
+			if (bpms[i] > max) { max = bpms[i]; }
+			if (bpms[i] < min) { min = bpms[i]; }
+		}
+		return { avg: total / bpms.length, max: max, min: min };
+	}
+
+	// ---- formatting (metric branch of LiveStatFormatting) ----------
+
+	function decimals(value, max) {
+		return value.toLocaleString(undefined, { maximumFractionDigits: max });
+	}
+
+	/** Metres below 1 km, kilometres above (up to two decimals). */
+	function formatDistance(meters) {
+		if (!Number.isFinite(meters)) {
+			return null;
+		}
+		if (meters >= 1000) {
+			return decimals(meters / 1000, 2) + ' km';
+		}
+		return decimals(meters, 0) + ' m';
+	}
+
+	/** Whole metres — elevation is noisy at the metre level. */
+	function formatElevation(meters) {
+		if (!Number.isFinite(meters)) {
+			return null;
+		}
+		return decimals(meters, 0) + ' m';
+	}
+
+	/** km/h, one decimal (the app's Track Detail precision). */
+	function formatSpeed(mps) {
+		if (!Number.isFinite(mps) || mps < 0) {
+			return null;
+		}
+		return (mps * 3.6).toLocaleString(undefined, {
+			minimumFractionDigits: 1,
+			maximumFractionDigits: 1,
+		}) + ' km/h';
+	}
+
+	/** `h:mm:ss` / `m:ss`. */
+	function formatDuration(seconds) {
+		if (!Number.isFinite(seconds)) {
+			return null;
+		}
+		const total = Math.round(seconds);
+		const h = Math.floor(total / 3600);
+		const m = Math.floor((total % 3600) / 60);
+		const s = total % 60;
+		const pad = function (n) { return n < 10 ? '0' + n : String(n); };
+		if (h > 0) {
+			return h + ':' + pad(m) + ':' + pad(s);
+		}
+		return m + ':' + pad(s);
+	}
+
+	/** `m:ss /km`, or null for a non-positive distance / duration. */
+	function formatPace(seconds, distanceMeters) {
+		if (!Number.isFinite(seconds) || !Number.isFinite(distanceMeters)
+			|| seconds <= 0 || distanceMeters <= 0) {
+			return null;
+		}
+		const secondsPerKm = seconds * (1000 / distanceMeters);
+		const total = Math.round(secondsPerKm);
+		const minutes = Math.floor(total / 60);
+		const secs = total % 60;
+		return minutes + ':' + (secs < 10 ? '0' + secs : String(secs)) + ' /km';
+	}
+
+	return {
+		ELEVATION_DEFAULTS: ELEVATION_DEFAULTS,
+		MOVING_SPEED_THRESHOLD_MPS: MOVING_SPEED_THRESHOLD_MPS,
+		elevationStats: elevationStats,
+		medianSmoothed: medianSmoothed,
+		medianSampleInterval: medianSampleInterval,
+		medianResidual: medianResidual,
+		distance: distance,
+		totalDistance: totalDistance,
+		cumulativeDistance: cumulativeDistance,
+		trackStats: trackStats,
+		formatDistance: formatDistance,
+		formatElevation: formatElevation,
+		formatSpeed: formatSpeed,
+		formatDuration: formatDuration,
+		formatPace: formatPace,
+	};
+});
