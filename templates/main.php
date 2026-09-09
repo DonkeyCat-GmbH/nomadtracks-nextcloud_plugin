@@ -17,9 +17,9 @@ declare(strict_types=1);
 		</div>
 		<div id="nomadtracks-sidebar-footer" hidden>
 			<span id="nomadtracks-track-count"></span>
-			<button id="nomadtracks-load-more" class="nt-button" hidden>
-				<?php p($l->t('Load 50 more')); ?>
-			</button>
+			<span class="nt-hint">
+				<?php p($l->t('Tick a track to draw it on the map.')); ?>
+			</span>
 		</div>
 	</aside>
 	<div id="nomadtracks-main">
@@ -35,4 +35,13 @@ declare(strict_types=1);
 		</div>
 		<div id="nomadtracks-toast" hidden></div>
 	</div>
+	<aside id="nomadtracks-details" aria-label="<?php p($l->t('Details')); ?>" hidden>
+		<div id="nomadtracks-details-header">
+			<h2 id="nomadtracks-details-title"></h2>
+			<button id="nomadtracks-details-close" class="nt-close"
+				type="button" title="<?php p($l->t('Close details')); ?>"
+				aria-label="<?php p($l->t('Close details')); ?>">×</button>
+		</div>
+		<div id="nomadtracks-details-body"></div>
+	</aside>
 </div>

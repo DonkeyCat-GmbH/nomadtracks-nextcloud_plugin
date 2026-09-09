@@ -30,6 +30,7 @@ class PageController extends Controller {
 		// dependency order (no build step — plain scripts).
 		Util::addScript(Application::APP_ID, 'vendor/maplibre-gl/maplibre-gl');
 		Util::addScript(Application::APP_ID, 'formats');
+		Util::addScript(Application::APP_ID, 'stats');
 		Util::addScript(Application::APP_ID, 'webdav');
 		Util::addScript(Application::APP_ID, 'main');
 		Util::addStyle(Application::APP_ID, 'vendor/maplibre-gl/maplibre-gl');
