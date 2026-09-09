@@ -3,6 +3,13 @@
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
 
+/* The `hidden` attribute is honoured by the UA stylesheet only; any author
+   rule that sets `display` overrides it. Several elements below are flex
+   containers that are toggled via `hidden`, so restore it explicitly. */
+#nomadtracks-app [hidden] {
+	display: none !important;
+}
+
 #content.app-nomadtracks {
 	padding: 0;
 }
