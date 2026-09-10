@@ -45,8 +45,20 @@
 	padding: 12px 8px;
 }
 
-.nt-root > h3 {
+.nt-root > summary {
 	margin: 12px 4px 4px 4px;
+	padding: 2px 4px;
+	border-radius: var(--border-radius);
+	cursor: pointer;
+}
+
+.nt-root > summary:hover {
+	background-color: var(--color-background-hover);
+}
+
+.nt-root > summary > h3 {
+	display: inline;
+	margin: 0;
 	font-size: 0.85em;
 	font-weight: bold;
 	text-transform: uppercase;
@@ -54,7 +66,7 @@
 	color: var(--color-text-maxcontrast);
 }
 
-.nt-root:first-child > h3 {
+.nt-root:first-child > summary {
 	margin-top: 0;
 }
 
@@ -141,6 +153,251 @@ details.nt-folder > summary:hover {
 .nt-item-map .nt-dot,
 .nt-item-route .nt-dot {
 	border-radius: 2px;
+}
+
+/* Track category glyph in place of the dot. The PNGs are the app's own
+   template artwork (alpha = shape), used as a mask so the dot's
+   background-colour — the track colour — shows through the glyph. */
+.nt-dot.nt-icon {
+	width: 18px;
+	height: 18px;
+	border-radius: 0;
+	-webkit-mask-repeat: no-repeat;
+	mask-repeat: no-repeat;
+	-webkit-mask-size: contain;
+	mask-size: contain;
+	-webkit-mask-position: center;
+	mask-position: center;
+}
+
+.nt-cat-atv {
+	-webkit-mask-image: url('../img/categories/atv.png');
+	mask-image: url('../img/categories/atv.png');
+}
+
+.nt-cat-boating {
+	-webkit-mask-image: url('../img/categories/boating.png');
+	mask-image: url('../img/categories/boating.png');
+}
+
+.nt-cat-canoeing {
+	-webkit-mask-image: url('../img/categories/canoeing.png');
+	mask-image: url('../img/categories/canoeing.png');
+}
+
+.nt-cat-climbing {
+	-webkit-mask-image: url('../img/categories/climbing.png');
+	mask-image: url('../img/categories/climbing.png');
+}
+
+.nt-cat-crossCountrySkiing {
+	-webkit-mask-image: url('../img/categories/crossCountrySkiing.png');
+	mask-image: url('../img/categories/crossCountrySkiing.png');
+}
+
+.nt-cat-cycling {
+	-webkit-mask-image: url('../img/categories/cycling.png');
+	mask-image: url('../img/categories/cycling.png');
+}
+
+.nt-cat-downhillBiking {
+	-webkit-mask-image: url('../img/categories/downhillBiking.png');
+	mask-image: url('../img/categories/downhillBiking.png');
+}
+
+.nt-cat-driving {
+	-webkit-mask-image: url('../img/categories/driving.png');
+	mask-image: url('../img/categories/driving.png');
+}
+
+.nt-cat-eBike {
+	-webkit-mask-image: url('../img/categories/eBike.png');
+	mask-image: url('../img/categories/eBike.png');
+}
+
+.nt-cat-eMTB {
+	-webkit-mask-image: url('../img/categories/eMTB.png');
+	mask-image: url('../img/categories/eMTB.png');
+}
+
+.nt-cat-flying {
+	-webkit-mask-image: url('../img/categories/flying.png');
+	mask-image: url('../img/categories/flying.png');
+}
+
+.nt-cat-geocaching {
+	-webkit-mask-image: url('../img/categories/geocaching.png');
+	mask-image: url('../img/categories/geocaching.png');
+}
+
+.nt-cat-gliding {
+	-webkit-mask-image: url('../img/categories/gliding.png');
+	mask-image: url('../img/categories/gliding.png');
+}
+
+.nt-cat-golf {
+	-webkit-mask-image: url('../img/categories/golf.png');
+	mask-image: url('../img/categories/golf.png');
+}
+
+.nt-cat-gravelBiking {
+	-webkit-mask-image: url('../img/categories/gravelBiking.png');
+	mask-image: url('../img/categories/gravelBiking.png');
+}
+
+.nt-cat-hiking {
+	-webkit-mask-image: url('../img/categories/hiking.png');
+	mask-image: url('../img/categories/hiking.png');
+}
+
+.nt-cat-horseriding {
+	-webkit-mask-image: url('../img/categories/horseriding.png');
+	mask-image: url('../img/categories/horseriding.png');
+}
+
+.nt-cat-iceClimbing {
+	-webkit-mask-image: url('../img/categories/iceClimbing.png');
+	mask-image: url('../img/categories/iceClimbing.png');
+}
+
+.nt-cat-iceSkating {
+	-webkit-mask-image: url('../img/categories/iceSkating.png');
+	mask-image: url('../img/categories/iceSkating.png');
+}
+
+.nt-cat-kayaking {
+	-webkit-mask-image: url('../img/categories/kayaking.png');
+	mask-image: url('../img/categories/kayaking.png');
+}
+
+.nt-cat-kitesurfing {
+	-webkit-mask-image: url('../img/categories/kitesurfing.png');
+	mask-image: url('../img/categories/kitesurfing.png');
+}
+
+.nt-cat-motorcycling {
+	-webkit-mask-image: url('../img/categories/motorcycling.png');
+	mask-image: url('../img/categories/motorcycling.png');
+}
+
+.nt-cat-mountainBiking {
+	-webkit-mask-image: url('../img/categories/mountainBiking.png');
+	mask-image: url('../img/categories/mountainBiking.png');
+}
+
+.nt-cat-mountaineering {
+	-webkit-mask-image: url('../img/categories/mountaineering.png');
+	mask-image: url('../img/categories/mountaineering.png');
+}
+
+.nt-cat-nordicWalking {
+	-webkit-mask-image: url('../img/categories/nordicWalking.png');
+	mask-image: url('../img/categories/nordicWalking.png');
+}
+
+.nt-cat-offroad {
+	-webkit-mask-image: url('../img/categories/offroad.png');
+	mask-image: url('../img/categories/offroad.png');
+}
+
+.nt-cat-overlanding {
+	-webkit-mask-image: url('../img/categories/overlanding.png');
+	mask-image: url('../img/categories/overlanding.png');
+}
+
+.nt-cat-paddleboarding {
+	-webkit-mask-image: url('../img/categories/paddleboarding.png');
+	mask-image: url('../img/categories/paddleboarding.png');
+}
+
+.nt-cat-paragliding {
+	-webkit-mask-image: url('../img/categories/paragliding.png');
+	mask-image: url('../img/categories/paragliding.png');
+}
+
+.nt-cat-rafting {
+	-webkit-mask-image: url('../img/categories/rafting.png');
+	mask-image: url('../img/categories/rafting.png');
+}
+
+.nt-cat-roadBiking {
+	-webkit-mask-image: url('../img/categories/roadBiking.png');
+	mask-image: url('../img/categories/roadBiking.png');
+}
+
+.nt-cat-rollerblading {
+	-webkit-mask-image: url('../img/categories/rollerblading.png');
+	mask-image: url('../img/categories/rollerblading.png');
+}
+
+.nt-cat-running {
+	-webkit-mask-image: url('../img/categories/running.png');
+	mask-image: url('../img/categories/running.png');
+}
+
+.nt-cat-sailing {
+	-webkit-mask-image: url('../img/categories/sailing.png');
+	mask-image: url('../img/categories/sailing.png');
+}
+
+.nt-cat-skiTouring {
+	-webkit-mask-image: url('../img/categories/skiTouring.png');
+	mask-image: url('../img/categories/skiTouring.png');
+}
+
+.nt-cat-skiing {
+	-webkit-mask-image: url('../img/categories/skiing.png');
+	mask-image: url('../img/categories/skiing.png');
+}
+
+.nt-cat-snowboarding {
+	-webkit-mask-image: url('../img/categories/snowboarding.png');
+	mask-image: url('../img/categories/snowboarding.png');
+}
+
+.nt-cat-snowshoeing {
+	-webkit-mask-image: url('../img/categories/snowshoeing.png');
+	mask-image: url('../img/categories/snowshoeing.png');
+}
+
+.nt-cat-splitboarding {
+	-webkit-mask-image: url('../img/categories/splitboarding.png');
+	mask-image: url('../img/categories/splitboarding.png');
+}
+
+.nt-cat-surveying {
+	-webkit-mask-image: url('../img/categories/surveying.png');
+	mask-image: url('../img/categories/surveying.png');
+}
+
+.nt-cat-swimming {
+	-webkit-mask-image: url('../img/categories/swimming.png');
+	mask-image: url('../img/categories/swimming.png');
+}
+
+.nt-cat-trailRunning {
+	-webkit-mask-image: url('../img/categories/trailRunning.png');
+	mask-image: url('../img/categories/trailRunning.png');
+}
+
+.nt-cat-trekking {
+	-webkit-mask-image: url('../img/categories/trekking.png');
+	mask-image: url('../img/categories/trekking.png');
+}
+
+.nt-cat-unspecified {
+	-webkit-mask-image: url('../img/categories/unspecified.png');
+	mask-image: url('../img/categories/unspecified.png');
+}
+
+.nt-cat-walking {
+	-webkit-mask-image: url('../img/categories/walking.png');
+	mask-image: url('../img/categories/walking.png');
+}
+
+.nt-cat-windsurfing {
+	-webkit-mask-image: url('../img/categories/windsurfing.png');
+	mask-image: url('../img/categories/windsurfing.png');
 }
 
 .nt-label {

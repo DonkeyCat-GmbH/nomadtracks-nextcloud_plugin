@@ -124,6 +124,7 @@
 					el: null,
 					checkbox: null,
 					loadPromise: null,
+					sidecarPromise: null,
 				};
 				items[root.kind].push(item);
 				node.items.push(item);
@@ -139,11 +140,16 @@
 		const container = document.getElementById('nomadtracks-tree');
 		container.textContent = '';
 		for (const rootNode of tree) {
-			const section = document.createElement('div');
+			// Every level of the tree starts collapsed; the user opens
+			// what they want to look at.
+			const section = document.createElement('details');
 			section.className = 'nt-root';
+			section.open = false;
+			const summary = document.createElement('summary');
 			const h = document.createElement('h3');
 			h.textContent = rootNode.name + ' (' + countItems(rootNode) + ')';
-			section.appendChild(h);
+			summary.appendChild(h);
+			section.appendChild(summary);
 			section.appendChild(renderFolderContents(rootNode));
 			container.appendChild(section);
 		}
@@ -162,7 +168,7 @@
 		wrap.className = 'nt-children';
 		for (const folder of node.folders) {
 			const details = document.createElement('details');
-			details.open = true;
+			details.open = false;
 			details.className = 'nt-folder';
 			const summary = document.createElement('summary');
 			summary.textContent = folder.name;
@@ -221,6 +227,54 @@
 			item.el.querySelector('.nt-dot').style.backgroundColor =
 				item.color || F.DEFAULT_TRACK_COLOR;
 		}
+	}
+
+	/**
+	 * Swap a track's plain dot for its category glyph, tinted with the
+	 * track colour — the same look as the app's library rows. The
+	 * glyph is a CSS mask (see .nt-icon / .nt-cat-* in main.css), so
+	 * the existing background-colour tint keeps doing the colouring.
+	 */
+	function applyCategoryIcon(item) {
+		if (!item.el || item.kind !== 'track') {
+			return;
+		}
+		const dot = item.el.querySelector('.nt-dot');
+		const key = F.trackCategoryKey(item.sidecar && item.sidecar.category);
+		for (const cls of Array.from(dot.classList)) {
+			if (cls.indexOf('nt-cat-') === 0) {
+				dot.classList.remove(cls);
+			}
+		}
+		dot.classList.add('nt-icon', 'nt-cat-' + key);
+		dot.title = F.trackCategoryName(key);
+	}
+
+	/**
+	 * Fetch a track's sidecar on its own, ahead of the GPX, so colour
+	 * and category show in the tree without the track being ticked.
+	 * Resolves to the parsed sidecar (or null); never rejects.
+	 */
+	function loadSidecar(item) {
+		if (!item.sidecarPromise) {
+			item.sidecarPromise = (item.sidecarPath
+				? NT.dav.getText(item.sidecarPath).then(F.parseSidecar)
+				: Promise.resolve(null)
+			).catch(function () {
+				return null;
+			}).then(function (sidecar) {
+				if (item.sidecar === undefined) {
+					item.sidecar = sidecar;
+				}
+				if (!item.loaded) {
+					item.color = (sidecar && sidecar.colorHex) || F.DEFAULT_TRACK_COLOR;
+				}
+				setItemColor(item);
+				applyCategoryIcon(item);
+				return sidecar;
+			});
+		}
+		return item.sidecarPromise;
 	}
 
 	function markActive(item) {
@@ -533,20 +587,17 @@
 	}
 
 	async function loadTrackOnce(item) {
-		const jobs = [NT.dav.getText(item.path)];
-		if (item.sidecarPath) {
-			jobs.push(NT.dav.getText(item.sidecarPath).catch(function () {
-				return null;
-			}));
-		}
-		const results = await Promise.all(jobs);
+		// The sidecar is (or is already being) fetched by the tree's
+		// background pass; share that request rather than repeat it.
+		const results = await Promise.all([
+			NT.dav.getText(item.path),
+			loadSidecar(item),
+		]);
 		const parsed = F.parseGpx(results[0]);
 		if (!parsed || parsed.segments.length === 0) {
 			throw new Error('no track geometry in ' + item.path);
 		}
-		const sidecar = results.length > 1 && results[1]
-			? F.parseSidecar(results[1])
-			: null;
+		const sidecar = results[1];
 		item.sidecar = sidecar;
 		item.gpx = parsed;
 		item.color = (sidecar && sidecar.colorHex) || F.DEFAULT_TRACK_COLOR;
@@ -1020,8 +1071,8 @@
 		const sidecar = item.sidecar;
 		if (sidecar) {
 			addStat(grid, tr('Rating'), formatRating(sidecar.rating));
-			if (sidecar.category && sidecar.category !== 'unspecified') {
-				addStat(grid, tr('Category'), sidecar.category);
+			if (F.trackCategoryKey(sidecar.category) !== 'unspecified') {
+				addStat(grid, tr('Category'), tr(F.trackCategoryName(sidecar.category)));
 			}
 			if (sidecar.colorHex) {
 				addStat(grid, tr('Color'), sidecar.colorHex);
@@ -1329,6 +1380,11 @@
 		}
 		renderTree(tree);
 		updateFooter();
+
+		// Colour + category for every track, filled in progressively
+		// as the (small) sidecars arrive. Not awaited: the map and the
+		// POIs must not wait on 100+ tiny requests.
+		NT.dav.mapLimit(items.track, FETCH_CONCURRENCY, loadSidecar);
 
 		// The map starts with no tracks drawn: a track appears only
 		// when its checkbox is ticked, mirroring the app's "Show on

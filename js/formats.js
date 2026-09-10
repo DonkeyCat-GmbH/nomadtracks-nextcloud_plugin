@@ -26,6 +26,78 @@
 	/** Default polyline color when no sidecar / metadata color exists. */
 	const DEFAULT_TRACK_COLOR = '#1E88E5';
 
+	/**
+	 * Track categories, keyed by the raw value the sidecar carries.
+	 * Mirrors `TrackCategory` in NomadTracksShared/TrackCategory.swift
+	 * (raw value → displayName); the raw values are a data contract
+	 * there and must not be renamed here either. The artwork in
+	 * img/categories/<rawValue>.png is the app's own, so every key in
+	 * this table has an icon.
+	 */
+	const TRACK_CATEGORY_NAMES = {
+		unspecified:        'None',
+		walking:            'Walking',
+		nordicWalking:      'Nordic Walking',
+		hiking:             'Hiking',
+		trekking:           'Trekking',
+		running:            'Running',
+		trailRunning:       'Trail Running',
+		cycling:            'Cycling',
+		roadBiking:         'Road Biking',
+		gravelBiking:       'Gravel Biking',
+		mountainBiking:     'Mountain Biking',
+		downhillBiking:     'Downhill',
+		eBike:              'E-Bike',
+		eMTB:               'E-MTB',
+		rollerblading:      'Inline Skating',
+		swimming:           'Swimming',
+		kayaking:           'Kayaking',
+		canoeing:           'Canoeing',
+		paddleboarding:     'Paddleboarding',
+		rafting:            'Rafting',
+		sailing:            'Sailing',
+		boating:            'Boating',
+		kitesurfing:        'Kitesurfing',
+		windsurfing:        'Windsurfing',
+		skiing:             'Skiing',
+		crossCountrySkiing: 'Cross-Country Skiing',
+		skiTouring:         'Ski Touring',
+		snowboarding:       'Snowboarding',
+		splitboarding:      'Splitboarding',
+		snowshoeing:        'Snowshoeing',
+		iceSkating:         'Ice Skating',
+		mountaineering:     'Mountaineering',
+		climbing:           'Climbing',
+		iceClimbing:        'Ice Climbing',
+		paragliding:        'Paragliding',
+		gliding:            'Gliding',
+		flying:             'Flying',
+		driving:            'Driving',
+		motorcycling:       'Motorcycling',
+		atv:                'ATV',
+		offroad:            'Offroad',
+		overlanding:        'Overlanding',
+		horseriding:        'Horseriding',
+		golf:               'Golf',
+		surveying:          'Surveying',
+		geocaching:         'Geocaching',
+	};
+
+	/**
+	 * Normalise a sidecar category to a key of TRACK_CATEGORY_NAMES.
+	 * Unknown or missing values fall back to 'unspecified', exactly
+	 * like `Track.category` does in the app.
+	 */
+	function trackCategoryKey(raw) {
+		return typeof raw === 'string'
+			&& Object.prototype.hasOwnProperty.call(TRACK_CATEGORY_NAMES, raw)
+			? raw : 'unspecified';
+	}
+
+	function trackCategoryName(raw) {
+		return TRACK_CATEGORY_NAMES[trackCategoryKey(raw)];
+	}
+
 	/** Text of the first descendant element with this local name. */
 	function firstText(el, localName) {
 		if (!el) {
@@ -392,5 +464,8 @@
 		sidecarPathFor: sidecarPathFor,
 		isSidecarPath: isSidecarPath,
 		normalizeColor: normalizeColor,
+		TRACK_CATEGORY_NAMES: TRACK_CATEGORY_NAMES,
+		trackCategoryKey: trackCategoryKey,
+		trackCategoryName: trackCategoryName,
 	};
 })();
