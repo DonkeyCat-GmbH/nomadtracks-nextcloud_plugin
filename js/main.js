@@ -21,14 +21,16 @@
 	 * Style URLs of the NomadTracks map server — the same two styles
 	 * the mobile apps offer (see `NomadTracksMapConfig.styleURL(for:)`
 	 * in the iOS repo: Standard is `/style.json`, Terrain is
-	 * `/style-topo.json`). The appkey is the same deliberately-public
-	 * client key the apps ship: it exists so the server can refuse
-	 * third-party scrapers, not as a secret.
+	 * `/style-topo.json`). This web client authenticates with its own
+	 * `webkey`, separate from the `appkey` the mobile apps ship, so the
+	 * map server can rate-limit and revoke the two independently. Like
+	 * the app key it is a deliberately-public client key — it ships in
+	 * the page source — not a secret.
 	 */
-	const APP_KEY = '8d94d1b903bf853f7b8602f2498e3249fe5d498d1498a1489a6aeaf52734f6e4';
+	const WEB_KEY = '27af6da439502b114d47008a247d7f45cedd6448036d4c4f7f7c9e25c0651304';
 	const MAP_TYPES = {
-		standard: 'https://map.nomadtracks.app/style.json?appkey=' + APP_KEY,
-		terrain: 'https://map.nomadtracks.app/style-topo.json?appkey=' + APP_KEY,
+		standard: 'https://map.nomadtracks.app/style.json?webkey=' + WEB_KEY,
+		terrain: 'https://map.nomadtracks.app/style-topo.json?webkey=' + WEB_KEY,
 	};
 	const MAP_TYPE_STORAGE_KEY = 'nomadtracks-map-type';
 
