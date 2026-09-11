@@ -24,11 +24,18 @@
 	const NT = (window.NomadTracks = window.NomadTracks || {});
 	const LOGBOOK_STORAGE_KEY = 'nomadtracks-logbook';
 
-	/** UI helpers handed over by the host in render(); see NT.addons. */
+	/**
+	 * UI helpers handed over by the host (see NT.addons). Every entry
+	 * point receives them in `ctx.ui`; `tr` also works before any
+	 * call, because the menu asks for title() first.
+	 */
 	let ui = null;
 
 	function tr(text) {
-		return ui.tr(text);
+		if (ui) {
+			return ui.tr(text);
+		}
+		return typeof window.t === 'function' ? window.t('nomadtracks', text) : text;
 	}
 
 	function makeEl(tag, className, text) {
@@ -280,10 +287,12 @@
 
 	NT.addons.register({
 		id: 'fahrtenprotokoll',
-		title: function () {
+		title: function (ctx) {
+			ui = ctx.ui;
 			return tr('Fahrtenprotokoll (practice drives)');
 		},
-		description: function () {
+		description: function (ctx) {
+			ui = ctx.ui;
 			return tr('Export the selected drives as an Austrian practice-driving logbook — print / PDF or CSV.');
 		},
 		appliesTo: function (ctx) {

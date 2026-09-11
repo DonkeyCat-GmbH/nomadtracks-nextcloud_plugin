@@ -826,8 +826,37 @@ details.nt-folder > summary:hover {
 /* ---- selection summary + logbook ---- */
 
 .nt-selection {
-	border-top: 1px solid var(--color-border);
-	padding-top: 10px;
+	margin-top: 16px;
+	padding: 12px 10px;
+	border-top: 3px solid var(--color-primary-element, #0082c9);
+	border-radius: 0 0 var(--border-radius-large, 10px) var(--border-radius-large, 10px);
+	background-color: var(--color-background-hover);
+}
+
+.nt-selection > h3 {
+	color: var(--color-main-text);
+}
+
+.nt-selection-intro {
+	margin: 0 0 10px;
+	font-size: 0.85em;
+	color: var(--color-text-maxcontrast);
+}
+
+/* The summary opened from the footer is the whole panel: no box. */
+#nomadtracks-details-body > .nt-selection:first-child {
+	margin-top: 0;
+	padding: 0;
+	border-top: none;
+	background: transparent;
+}
+
+/* Category glyph in the details header, a touch larger than in rows. */
+.nt-details-swatch.nt-icon {
+	width: 22px;
+	height: 22px;
+	border: none;
+	border-radius: 0;
 }
 
 .nt-categories {

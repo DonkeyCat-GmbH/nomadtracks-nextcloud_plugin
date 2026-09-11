@@ -16,8 +16,8 @@
  *
  *   {
  *     id:          string  — unique, stable (used to remember the open panel)
- *     title():     string  — menu entry / panel heading (translated)
- *     description(): string — optional one-liner under the menu entry
+ *     title(ctx):  string  — menu entry / panel heading (translated)
+ *     description(ctx): string — optional one-liner under the menu entry
  *     appliesTo(ctx): boolean — optional; false hides the entry for
  *                  this selection (e.g. needs timestamps)
  *     render(container, ctx): void — build the add-on's UI into

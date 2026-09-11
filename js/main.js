@@ -615,30 +615,46 @@
 	}
 
 	/**
-	 * The arrow glyph: a white chevron with a dark outline, pointing
-	 * along +x, drawn at 2× for crisp edges. White-on-outline reads on
-	 * any track colour, which is why the icon is not tinted per track.
+	 * The arrow glyph as a signed-distance field, so the symbol layer
+	 * can tint it per track (`icon-color`) and give it a halo. A
+	 * chevron pointing along +x, 48 px at 2×. The encoding is the one
+	 * MapLibre's SDF shader expects (the TinySDF convention): alpha =
+	 * 255 · (0.75 − d / 8), with d the distance outside the shape in
+	 * texture pixels, so the edge sits at 0.75 and the field fades
+	 * over 8 px — that fade is what the halo is drawn from.
 	 */
 	function arrowImage() {
-		// 48 px at 2× = a 24 px glyph on screen before icon-size.
 		const size = 48;
-		const canvas = document.createElement('canvas');
-		canvas.width = size;
-		canvas.height = size;
-		const ctx = canvas.getContext('2d');
-		ctx.lineJoin = 'round';
-		ctx.lineCap = 'round';
-		ctx.beginPath();
-		ctx.moveTo(15, 9);
-		ctx.lineTo(35, 24);
-		ctx.lineTo(15, 39);
-		ctx.strokeStyle = 'rgba(0, 0, 0, 0.8)';
-		ctx.lineWidth = 11;
-		ctx.stroke();
-		ctx.strokeStyle = '#ffffff';
-		ctx.lineWidth = 5.5;
-		ctx.stroke();
-		return ctx.getImageData(0, 0, size, size);
+		const halfWidth = 2.75;
+		const segs = [[[15, 9], [35, 24]], [[35, 24], [15, 39]]];
+		const distToSeg = function (px, py, a, b) {
+			const dx = b[0] - a[0];
+			const dy = b[1] - a[1];
+			const t = Math.max(0, Math.min(1,
+				((px - a[0]) * dx + (py - a[1]) * dy) / (dx * dx + dy * dy)));
+			const cx = a[0] + t * dx - px;
+			const cy = a[1] + t * dy - py;
+			return Math.sqrt(cx * cx + cy * cy);
+		};
+		const data = new Uint8ClampedArray(size * size * 4);
+		for (let y = 0; y < size; y++) {
+			for (let x = 0; x < size; x++) {
+				const px = x + 0.5;
+				const py = y + 0.5;
+				let d = Infinity;
+				for (const seg of segs) {
+					d = Math.min(d, distToSeg(px, py, seg[0], seg[1]));
+				}
+				d -= halfWidth; // negative inside the stroked chevron
+				const alpha = Math.round(255 * (0.75 - d / 8));
+				const i = (y * size + x) * 4;
+				data[i] = 0;
+				data[i + 1] = 0;
+				data[i + 2] = 0;
+				data[i + 3] = Math.max(0, Math.min(255, alpha));
+			}
+		}
+		return { width: size, height: size, data: data };
 	}
 
 	function initMap() {
@@ -711,12 +727,14 @@
 			},
 		});
 		map.addSource('nt-selected', { type: 'geojson', data: EMPTY_FC });
+		// Selection highlight: a yellow band under the track's own
+		// line, so the selected track stands out from the other drawn ones.
 		map.addLayer({
 			id: 'nt-selected-halo',
 			type: 'line',
 			source: 'nt-selected',
 			layout: { 'line-join': 'round', 'line-cap': 'round' },
-			paint: { 'line-color': '#ffffff', 'line-width': 8, 'line-opacity': 0.9 },
+			paint: { 'line-color': '#ffd60a', 'line-width': 10, 'line-opacity': 0.95 },
 		});
 		map.addLayer({
 			id: 'nt-selected-line',
@@ -730,7 +748,7 @@
 		// point order). Images are dropped by a style switch too, so
 		// the glyph is re-registered here each time.
 		if (!map.hasImage('nt-arrow')) {
-			map.addImage('nt-arrow', arrowImage(), { pixelRatio: 2 });
+			map.addImage('nt-arrow', arrowImage(), { pixelRatio: 2, sdf: true });
 		}
 		map.addLayer({
 			id: 'nt-tracks-arrows',
@@ -753,6 +771,14 @@
 				'icon-allow-overlap': true,
 				'icon-ignore-placement': true,
 				visibility: arrowsOn ? 'visible' : 'none',
+			},
+			paint: {
+				// The track's own colour, with a white halo so the
+				// chevron still separates from the line it sits on.
+				'icon-color': ['get', 'color'],
+				'icon-halo-color': 'rgba(255, 255, 255, 0.95)',
+				'icon-halo-width': 1.5,
+				'icon-halo-blur': 0.2,
 			},
 		});
 		// Chart scrubber dot, styled like the app's `nomad-cursor`
@@ -1340,8 +1366,20 @@
 		const header = makeEl('div', 'nt-details-meta');
 		const swatch = makeEl('span', 'nt-details-swatch');
 		swatch.style.backgroundColor = item.color || F.DEFAULT_TRACK_COLOR;
+		let label = kindLabel;
+		if (item.kind === 'track') {
+			// The category glyph, tinted with the track colour — the
+			// same mark the sidebar row uses.
+			const key = F.trackCategoryKey(item.sidecar && item.sidecar.category);
+			swatch.classList.add('nt-dot', 'nt-icon', 'nt-cat-' + key);
+			const categoryName = tr(F.trackCategoryName(key));
+			swatch.title = categoryName;
+			if (key !== 'unspecified') {
+				label = kindLabel + ' · ' + categoryName;
+			}
+		}
 		header.appendChild(swatch);
-		header.appendChild(makeEl('span', 'nt-details-kind', kindLabel));
+		header.appendChild(makeEl('span', 'nt-details-kind', label));
 		body.appendChild(header);
 		const pathEl = makeEl('p', 'nt-details-path', item.path);
 		pathEl.title = item.path;
@@ -1439,9 +1477,6 @@
 			if (F.trackCategoryKey(sidecar.category) !== 'unspecified') {
 				addStat(grid, tr('Category'), tr(F.trackCategoryName(sidecar.category)));
 			}
-			if (sidecar.colorHex) {
-				addStat(grid, tr('Color'), sidecar.colorHex);
-			}
 			if (Number.isFinite(sidecar.photoCount) && sidecar.photoCount > 0) {
 				addStat(grid, tr('Photos in sidecar'), String(sidecar.photoCount));
 			}
@@ -1494,7 +1529,6 @@
 			addStat(grid, tr('Created'), Number.isFinite(ms)
 				? formatDateTime(ms / 1000) : poi.createdAt);
 		}
-		addStat(grid, tr('Color'), poi.color);
 		addStat(grid, tr('Folder'), poi.folderPath || poi.folder);
 		addStat(grid, tr('Shown on map in the app'),
 			poi.isVisibleOnMap ? tr('Yes') : tr('No'));
@@ -1601,7 +1635,9 @@
 		const section = makeEl('section', 'nt-section nt-selection');
 		section.id = SUMMARY_ID;
 		section.appendChild(makeEl('h3', null,
-			tr('Selected tracks') + ' (' + agg.count + ')'));
+			tr('Summary of all shown tracks') + ' (' + agg.count + ')'));
+		section.appendChild(makeEl('p', 'nt-selection-intro',
+			tr('Totals across every track currently ticked on the map — not only the one selected above.')));
 
 		const grid = makeEl('div', 'nt-stats');
 		addStat(grid, tr('Distance'), S.formatDistance(agg.distanceMeters));
@@ -1685,7 +1721,7 @@
 		if (!section) {
 			return;
 		}
-		const body = openDetails(tr('Selected tracks'), 'summary');
+		const body = openDetails(tr('Summary of all shown tracks'), 'summary');
 		// The section brings its own heading; the panel title has it.
 		section.removeChild(section.querySelector('h3'));
 		body.appendChild(section);
@@ -1730,6 +1766,15 @@
 			activeAddonId = null;
 		}
 
+		const safe = function (addon, fn, fallback) {
+			try {
+				return typeof addon[fn] === 'function' ? addon[fn](ctx) : fallback;
+			} catch (e) {
+				console.warn('nomadtracks: add-on', addon.id, 'failed in ' + fn, e);
+				return fallback;
+			}
+		};
+
 		const wrap = makeEl('div', 'nt-addons');
 		const bar = makeEl('div', 'nt-addons-bar');
 		const toggle = makeEl('button', 'nt-button nt-addons-toggle', tr('Add-ons') + ' ▾');
@@ -1745,9 +1790,11 @@
 			const button = makeEl('button', 'nt-addons-item');
 			button.type = 'button';
 			button.setAttribute('role', 'menuitem');
-			button.appendChild(makeEl('span', 'nt-addons-item-title', addon.title()));
-			if (typeof addon.description === 'function') {
-				button.appendChild(makeEl('span', 'nt-addons-item-desc', addon.description()));
+			button.appendChild(makeEl('span', 'nt-addons-item-title',
+				safe(addon, 'title', addon.id)));
+			const desc = safe(addon, 'description', null);
+			if (desc) {
+				button.appendChild(makeEl('span', 'nt-addons-item-desc', desc));
 			}
 			button.addEventListener('click', function () {
 				closeMenu();
@@ -1793,13 +1840,19 @@
 		if (old) {
 			wrap.removeChild(old);
 		}
+		let title = addon.id;
+		try {
+			title = addon.title(ctx);
+		} catch (e) {
+			console.warn('nomadtracks: add-on', addon.id, 'failed in title', e);
+		}
 		const panel = makeEl('div', 'nt-addon-panel');
 		const header = makeEl('div', 'nt-addon-header');
-		header.appendChild(makeEl('h4', null, addon.title()));
+		header.appendChild(makeEl('h4', null, title));
 		const close = makeEl('button', 'nt-close', '×');
 		close.type = 'button';
 		close.title = tr('Close');
-		close.setAttribute('aria-label', tr('Close') + ': ' + addon.title());
+		close.setAttribute('aria-label', tr('Close') + ': ' + title);
 		close.addEventListener('click', function () {
 			activeAddonId = null;
 			wrap.removeChild(panel);
@@ -2212,7 +2265,12 @@
 			.addEventListener('click', function () {
 				markActive(null);
 				setSelectedFeature(null);
-				showSummaryPanel();
+				try {
+					showSummaryPanel();
+				} catch (e) {
+					console.error('nomadtracks: summary failed', e);
+					showToast(tr('The summary could not be shown. See the browser console for details.'));
+				}
 			});
 
 		let tree;
