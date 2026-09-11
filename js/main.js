@@ -33,6 +33,9 @@
 		terrain: 'https://map.nomadtracks.app/style-topo.json?webkey=' + WEB_KEY,
 	};
 	const MAP_TYPE_STORAGE_KEY = 'nomadtracks-map-type';
+	const SIDEBAR_WIDTH_STORAGE_KEY = 'nomadtracks-sidebar-width';
+	const SIDEBAR_DEFAULT_WIDTH = 300;
+	const SIDEBAR_MIN_WIDTH = 200;
 	const ARROWS_STORAGE_KEY = 'nomadtracks-arrows';
 
 	const FETCH_CONCURRENCY = 6;
@@ -617,7 +620,8 @@
 	 * any track colour, which is why the icon is not tinted per track.
 	 */
 	function arrowImage() {
-		const size = 32;
+		// 48 px at 2× = a 24 px glyph on screen before icon-size.
+		const size = 48;
 		const canvas = document.createElement('canvas');
 		canvas.width = size;
 		canvas.height = size;
@@ -625,14 +629,14 @@
 		ctx.lineJoin = 'round';
 		ctx.lineCap = 'round';
 		ctx.beginPath();
-		ctx.moveTo(9, 7);
-		ctx.lineTo(23, 16);
-		ctx.lineTo(9, 25);
-		ctx.strokeStyle = 'rgba(0, 0, 0, 0.75)';
-		ctx.lineWidth = 8;
+		ctx.moveTo(15, 9);
+		ctx.lineTo(35, 24);
+		ctx.lineTo(15, 39);
+		ctx.strokeStyle = 'rgba(0, 0, 0, 0.8)';
+		ctx.lineWidth = 11;
 		ctx.stroke();
 		ctx.strokeStyle = '#ffffff';
-		ctx.lineWidth = 4;
+		ctx.lineWidth = 5.5;
 		ctx.stroke();
 		return ctx.getImageData(0, 0, size, size);
 	}
@@ -734,9 +738,15 @@
 			source: 'nt-tracks',
 			layout: {
 				'symbol-placement': 'line',
-				'symbol-spacing': 80,
+				'symbol-spacing': 70,
 				'icon-image': 'nt-arrow',
-				'icon-size': 0.75,
+				// Grows with zoom: readable on a whole-route view, not
+				// a wall of chevrons when zoomed in on a street.
+				'icon-size': ['interpolate', ['linear'], ['zoom'],
+					8, 0.6,
+					13, 0.9,
+					16, 1.1,
+					19, 1.4],
 				'icon-rotation-alignment': 'map',
 				'icon-pitch-alignment': 'map',
 				'icon-keep-upright': false,
@@ -1510,10 +1520,9 @@
 		}
 	}
 
-	// ---- selection summary + logbook -------------------------------
+	// ---- selection summary -----------------------------------------
 
 	const SUMMARY_ID = 'nomadtracks-selection';
-	const LOGBOOK_STORAGE_KEY = 'nomadtracks-logbook';
 
 	/** Ticked tracks whose GPX has been parsed, oldest first. */
 	function shownTracks() {
@@ -1580,7 +1589,7 @@
 
 	/**
 	 * The "Selected tracks" section: totals, a category breakdown and
-	 * the logbook export. Returns null when fewer than two tracks are
+	 * the add-ons menu. Returns null when fewer than two tracks are
 	 * shown — one track's numbers are already its own details.
 	 */
 	function renderSelectionSummary() {
@@ -1632,7 +1641,10 @@
 			section.appendChild(list2);
 		}
 
-		section.appendChild(renderLogbookExport(list, agg));
+		const addons = renderAddons(list, agg);
+		if (addons) {
+			section.appendChild(addons);
+		}
 		return section;
 	}
 
@@ -1679,253 +1691,130 @@
 		body.appendChild(section);
 	}
 
-	// ---- Fahrtenprotokoll (Austrian practice-drive logbook) ---------
+	// ---- add-ons ----------------------------------------------------
 	//
-	// Layout follows the "Fahrtenprotokoll gemäß § 19 Abs. 8 FSG" sheet
-	// the driving schools hand out for L / L17 practice drives: Datum,
-	// gefahrene km, Kilometerstand von/bis, Kfz-Kennzeichen, Tageszeit,
-	// Fahrstrecke/-ziel, Straßenzustand/Witterung, and one signature
-	// column each for Begleiter and Bewerber. A GPX only knows some of
-	// these; the rest stay empty to be filled in by hand (the sheet
-	// has to be signed by hand anyway). The sheet itself is German
-	// regardless of the UI language — it is an Austrian form.
+	// Special-purpose tools that work on the selected tracks live in
+	// js/addons/*.js and register themselves with NT.addons (see
+	// js/addons.js for the contract). They are reached through a
+	// small "Add-ons" menu at the end of the selection summary, so
+	// none of them is in the way when it is not wanted.
 
-	function storedLogbookFields() {
-		try {
-			const raw = window.localStorage.getItem(LOGBOOK_STORAGE_KEY);
-			const v = raw ? JSON.parse(raw) : null;
-			return {
-				name: v && typeof v.name === 'string' ? v.name : '',
-				plate: v && typeof v.plate === 'string' ? v.plate : '',
-			};
-		} catch (e) {
-			return { name: '', plate: '' };
-		}
-	}
+	/** Which add-on's panel is open, so a summary re-render keeps it. */
+	let activeAddonId = null;
 
-	function rememberLogbookFields(fields) {
-		try {
-			window.localStorage.setItem(LOGBOOK_STORAGE_KEY, JSON.stringify(fields));
-		} catch (e) {
-			// Fine — they will just have to be typed again next time.
-		}
-	}
-
-	function renderLogbookExport(list, agg) {
-		const wrap = makeEl('div', 'nt-logbook');
-		wrap.appendChild(makeEl('h4', null, tr('Practice-driving logbook')));
-		wrap.appendChild(makeEl('p', 'nt-hint',
-			tr('Exports the selected tracks as an Austrian Fahrtenprotokoll (§ 19 Abs. 8 FSG). Odometer readings, road conditions and signatures are left blank to fill in by hand.')));
-
-		const stored = storedLogbookFields();
-		const form = makeEl('div', 'nt-logbook-fields');
-		const nameInput = makeEl('input');
-		nameInput.type = 'text';
-		nameInput.placeholder = tr('Name of the learner driver');
-		nameInput.value = stored.name;
-		nameInput.setAttribute('aria-label', nameInput.placeholder);
-		const plateInput = makeEl('input');
-		plateInput.type = 'text';
-		plateInput.placeholder = tr('Licence plate (Kfz-Kennzeichen)');
-		plateInput.value = stored.plate;
-		plateInput.setAttribute('aria-label', plateInput.placeholder);
-		form.appendChild(nameInput);
-		form.appendChild(plateInput);
-		wrap.appendChild(form);
-
-		const readFields = function () {
-			const fields = { name: nameInput.value.trim(), plate: plateInput.value.trim() };
-			rememberLogbookFields(fields);
-			return fields;
+	function addonContext(list, agg) {
+		return {
+			tracks: list,
+			aggregate: agg,
+			ui: { makeEl: makeEl, tr: tr, showToast: showToast },
 		};
+	}
 
-		const actions = makeEl('div', 'nt-logbook-actions');
-		const printBtn = makeEl('button', 'nt-button', tr('Print / save as PDF'));
-		printBtn.type = 'button';
-		printBtn.addEventListener('click', function () {
-			openPrintableLogbook(list, agg, readFields());
+	function renderAddons(list, agg) {
+		if (!NT.addons) {
+			return null;
+		}
+		const ctx = addonContext(list, agg);
+		const available = NT.addons.all().filter(function (addon) {
+			try {
+				return typeof addon.appliesTo !== 'function' || addon.appliesTo(ctx);
+			} catch (e) {
+				console.warn('nomadtracks: add-on', addon.id, 'failed in appliesTo', e);
+				return false;
+			}
 		});
-		const csvBtn = makeEl('button', 'nt-button', tr('Download CSV'));
-		csvBtn.type = 'button';
-		csvBtn.addEventListener('click', function () {
-			downloadLogbookCsv(list, readFields());
-		});
-		actions.appendChild(printBtn);
-		actions.appendChild(csvBtn);
-		wrap.appendChild(actions);
+		if (available.length === 0) {
+			return null;
+		}
+		if (activeAddonId && !available.some(function (a) { return a.id === activeAddonId; })) {
+			activeAddonId = null;
+		}
 
-		const untimed = list.filter(function (t) {
-			return t.detail.startedAt === null;
-		}).length;
-		if (untimed > 0) {
-			wrap.appendChild(makeEl('p', 'nt-hint',
-				tr('%n of the selected tracks have no timestamps and will be listed without a date.')
-					.replace('%n', String(untimed))));
+		const wrap = makeEl('div', 'nt-addons');
+		const bar = makeEl('div', 'nt-addons-bar');
+		const toggle = makeEl('button', 'nt-button nt-addons-toggle', tr('Add-ons') + ' ▾');
+		toggle.type = 'button';
+		toggle.setAttribute('aria-haspopup', 'menu');
+		toggle.setAttribute('aria-expanded', 'false');
+		const menu = makeEl('ul', 'nt-addons-menu');
+		menu.setAttribute('role', 'menu');
+		menu.hidden = true;
+		for (const addon of available) {
+			const li = makeEl('li');
+			li.setAttribute('role', 'none');
+			const button = makeEl('button', 'nt-addons-item');
+			button.type = 'button';
+			button.setAttribute('role', 'menuitem');
+			button.appendChild(makeEl('span', 'nt-addons-item-title', addon.title()));
+			if (typeof addon.description === 'function') {
+				button.appendChild(makeEl('span', 'nt-addons-item-desc', addon.description()));
+			}
+			button.addEventListener('click', function () {
+				closeMenu();
+				activeAddonId = addon.id;
+				showAddonPanel(wrap, addon, ctx);
+			});
+			li.appendChild(button);
+			menu.appendChild(li);
+		}
+		bar.appendChild(toggle);
+		bar.appendChild(menu);
+		wrap.appendChild(bar);
+
+		const onOutsideClick = function (e) {
+			if (!bar.contains(e.target)) {
+				closeMenu();
+			}
+		};
+		const closeMenu = function () {
+			menu.hidden = true;
+			toggle.setAttribute('aria-expanded', 'false');
+			document.removeEventListener('click', onOutsideClick, true);
+		};
+		toggle.addEventListener('click', function () {
+			if (menu.hidden) {
+				menu.hidden = false;
+				toggle.setAttribute('aria-expanded', 'true');
+				document.addEventListener('click', onOutsideClick, true);
+			} else {
+				closeMenu();
+			}
+		});
+
+		if (activeAddonId) {
+			const active = available.find(function (a) { return a.id === activeAddonId; });
+			showAddonPanel(wrap, active, ctx);
 		}
 		return wrap;
 	}
 
-	function pad2(n) {
-		return n < 10 ? '0' + n : String(n);
-	}
-
-	function formatDateDE(epochSeconds) {
-		if (!Number.isFinite(epochSeconds)) {
-			return '';
+	function showAddonPanel(wrap, addon, ctx) {
+		const old = wrap.querySelector('.nt-addon-panel');
+		if (old) {
+			wrap.removeChild(old);
 		}
-		const d = new Date(epochSeconds * 1000);
-		return pad2(d.getDate()) + '.' + pad2(d.getMonth() + 1) + '.' + d.getFullYear();
-	}
-
-	function formatTimeDE(epochSeconds) {
-		if (!Number.isFinite(epochSeconds)) {
-			return '';
-		}
-		const d = new Date(epochSeconds * 1000);
-		return pad2(d.getHours()) + ':' + pad2(d.getMinutes());
-	}
-
-	/** km with one decimal and a German decimal comma. */
-	function formatKmDE(meters) {
-		return (Math.round(meters / 100) / 10).toFixed(1).replace('.', ',');
-	}
-
-	/** One sheet row per track, in the column order of the form. */
-	function logbookRows(list, fields) {
-		return list.map(function (t) {
-			const d = t.detail;
-			const start = d.startedAt;
-			const end = start !== null && d.durationSeconds !== null
-				? start + d.durationSeconds : null;
-			let time = formatTimeDE(start);
-			if (end !== null) {
-				time += ' – ' + formatTimeDE(end);
-			}
-			const address = t.sidecar ? t.sidecar.address : null;
-			const from = address ? (address.city || address.street || '') : '';
-			const gpxName = t.gpx && t.gpx.name ? t.gpx.name : t.name;
-			const route = from ? gpxName + ' (ab ' + from + ')' : gpxName;
-			return {
-				date: formatDateDE(start),
-				km: formatKmDE(d.distanceMeters || 0),
-				odoFrom: '',
-				odoTo: '',
-				plate: fields.plate,
-				time: time,
-				route: route,
-				conditions: '',
-				sortKey: start || 0,
-			};
+		const panel = makeEl('div', 'nt-addon-panel');
+		const header = makeEl('div', 'nt-addon-header');
+		header.appendChild(makeEl('h4', null, addon.title()));
+		const close = makeEl('button', 'nt-close', '×');
+		close.type = 'button';
+		close.title = tr('Close');
+		close.setAttribute('aria-label', tr('Close') + ': ' + addon.title());
+		close.addEventListener('click', function () {
+			activeAddonId = null;
+			wrap.removeChild(panel);
 		});
-	}
-
-	function escapeHtml(text) {
-		return String(text)
-			.replace(/&/g, '&amp;').replace(/</g, '&lt;')
-			.replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-	}
-
-	function openPrintableLogbook(list, agg, fields) {
-		const rows = logbookRows(list, fields);
-		const heads = ['Datum', 'gefahrene km', 'Kilometerstand von', 'Kilometerstand bis',
-			'Kfz-Kennzeichen', 'Tageszeit', 'Fahrstrecke/-ziel', 'Straßenzustand, Witterung',
-			'Unterschrift Begleiter/in', 'Unterschrift Bewerber/in'];
-		let html = '<!DOCTYPE html><html lang="de"><head><meta charset="utf-8">'
-			+ '<title>Fahrtenprotokoll</title><style>'
-			+ '@page{size:A4 landscape;margin:12mm}'
-			+ 'body{font:11pt/1.35 -apple-system,"Segoe UI",Helvetica,Arial,sans-serif;color:#000;margin:0}'
-			+ 'h1{font-size:15pt;margin:0 0 2mm}'
-			+ '.meta{display:flex;gap:12mm;margin:0 0 4mm;font-size:11pt}'
-			+ '.meta span{border-bottom:1px solid #000;min-width:50mm;display:inline-block;padding:0 2mm}'
-			+ 'table{border-collapse:collapse;width:100%;font-size:9.5pt}'
-			+ 'th,td{border:1px solid #000;padding:1.6mm 1.4mm;vertical-align:top;text-align:left}'
-			+ 'th{background:#eee;font-weight:600}'
-			+ 'td.num{text-align:right;white-space:nowrap}'
-			+ 'td.sig{min-width:26mm;height:9mm}'
-			+ 'tfoot td{font-weight:600}'
-			+ '.note{margin-top:4mm;font-size:8.5pt;color:#333}'
-			+ '.screen{margin:0 0 4mm;padding:2mm 3mm;background:#fff3cd;border:1px solid #d9b84a;font-size:10pt}'
-			+ '@media print{.screen{display:none}}'
-			+ '</style></head><body>'
-			+ '<p class="screen">Zum Speichern als PDF: Drucken (⌘P / Strg+P) und als Ziel „Als PDF sichern“ wählen.</p>'
-			+ '<h1>Fahrtenprotokoll gemäß § 19 Abs. 8 FSG</h1>'
-			+ '<div class="meta">'
-			+ '<div>Name: <span>' + escapeHtml(fields.name) + '</span></div>'
-			+ '<div>Kfz-Kennzeichen: <span>' + escapeHtml(fields.plate) + '</span></div>'
-			+ '<div>Gefahrene Gesamtkilometer: <span>' + formatKmDE(agg.distanceMeters) + ' km</span></div>'
-			+ '</div><table><thead><tr>';
-		for (const h of heads) {
-			html += '<th>' + escapeHtml(h) + '</th>';
+		header.appendChild(close);
+		panel.appendChild(header);
+		const body = makeEl('div', 'nt-addon-body');
+		try {
+			addon.render(body, ctx);
+		} catch (e) {
+			console.error('nomadtracks: add-on', addon.id, 'failed to render', e);
+			body.appendChild(makeEl('p', 'nt-hint', tr('This add-on could not be shown. See the browser console for details.')));
 		}
-		html += '</tr></thead><tbody>';
-		for (const r of rows) {
-			html += '<tr>'
-				+ '<td>' + escapeHtml(r.date) + '</td>'
-				+ '<td class="num">' + escapeHtml(r.km) + '</td>'
-				+ '<td class="num"></td><td class="num"></td>'
-				+ '<td>' + escapeHtml(r.plate) + '</td>'
-				+ '<td>' + escapeHtml(r.time) + '</td>'
-				+ '<td>' + escapeHtml(r.route) + '</td>'
-				+ '<td></td><td class="sig"></td><td class="sig"></td>'
-				+ '</tr>';
-		}
-		html += '</tbody><tfoot><tr><td>Summe</td><td class="num">'
-			+ formatKmDE(agg.distanceMeters) + '</td><td colspan="8">'
-			+ rows.length + ' Fahrten</td></tr></tfoot></table>'
-			+ '<p class="note">Das Fahrtenprotokoll ist wahrheitsgetreu zu führen und für jede Fahrt '
-			+ 'von Begleiter/in und Bewerber/in zu unterschreiben. Kilometerstand und '
-			+ 'Straßenzustand/Witterung sind händisch zu ergänzen. Erstellt mit NomadTracks am '
-			+ formatDateDE(Date.now() / 1000) + '.</p>'
-			+ '</body></html>';
-
-		const url = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
-		const w = window.open(url, '_blank');
-		if (!w) {
-			showToast(tr('The browser blocked the print window. Allow pop-ups for this site and try again.'));
-			return;
-		}
-		// Kick off the print dialog once the sheet has rendered; if
-		// the browser does not fire this, the sheet explains ⌘P.
-		w.addEventListener('load', function () {
-			setTimeout(function () {
-				try {
-					w.print();
-				} catch (e) {
-					// The on-screen hint covers this case.
-				}
-			}, 250);
-		});
-	}
-
-	function downloadLogbookCsv(list, fields) {
-		const rows = logbookRows(list, fields);
-		const heads = ['Datum', 'gefahrene km', 'Kilometerstand von', 'Kilometerstand bis',
-			'Kfz-Kennzeichen', 'Tageszeit', 'Fahrstrecke/-ziel', 'Straßenzustand, Witterung',
-			'Unterschrift Begleiter/in', 'Unterschrift Bewerber/in'];
-		const cell = function (v) {
-			return '"' + String(v).replace(/"/g, '""') + '"';
-		};
-		const lines = [];
-		if (fields.name) {
-			lines.push(cell('Name') + ';' + cell(fields.name));
-		}
-		lines.push(heads.map(cell).join(';'));
-		for (const r of rows) {
-			lines.push([r.date, r.km, r.odoFrom, r.odoTo, r.plate, r.time, r.route,
-				r.conditions, '', ''].map(cell).join(';'));
-		}
-		// BOM + semicolons: what German-locale spreadsheets expect.
-		const blob = new Blob(['\ufeff' + lines.join('\r\n') + '\r\n'],
-			{ type: 'text/csv;charset=utf-8' });
-		const a = document.createElement('a');
-		a.href = URL.createObjectURL(blob);
-		a.download = 'Fahrtenprotokoll-' + formatDateDE(Date.now() / 1000).replace(/\./g, '-') + '.csv';
-		document.body.appendChild(a);
-		a.click();
-		document.body.removeChild(a);
-		setTimeout(function () {
-			URL.revokeObjectURL(a.href);
-		}, 10000);
+		panel.appendChild(body);
+		wrap.appendChild(panel);
 	}
 
 	// ---- elevation profile (inline SVG, no charting library) -------
@@ -2206,6 +2095,104 @@
 		return item.loaded;
 	}
 
+	// ---- resizable sidebar ------------------------------------------
+
+	function sidebarMaxWidth() {
+		// Leave the map at least 320 px plus room for the details pane.
+		return Math.max(SIDEBAR_MIN_WIDTH, window.innerWidth - 320 - 340);
+	}
+
+	function applySidebarWidth(width) {
+		const clamped = Math.round(Math.min(sidebarMaxWidth(),
+			Math.max(SIDEBAR_MIN_WIDTH, width)));
+		document.getElementById('nomadtracks-sidebar').style.width = clamped + 'px';
+		return clamped;
+	}
+
+	function initSidebarResizer() {
+		const app = document.getElementById('nomadtracks-app');
+		const handle = document.getElementById('nomadtracks-resizer');
+		const sidebar = document.getElementById('nomadtracks-sidebar');
+		if (!handle || !sidebar) {
+			return;
+		}
+		let stored = null;
+		try {
+			stored = parseInt(window.localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY), 10);
+		} catch (e) {
+			// Fine — default width.
+		}
+		if (Number.isFinite(stored)) {
+			applySidebarWidth(stored);
+		}
+
+		let startX = 0;
+		let startWidth = 0;
+		const onMove = function (e) {
+			applySidebarWidth(startWidth + (e.clientX - startX));
+		};
+		const onUp = function () {
+			app.classList.remove('nt-resizing');
+			window.removeEventListener('pointermove', onMove);
+			window.removeEventListener('pointerup', onUp);
+			window.removeEventListener('pointercancel', onUp);
+			try {
+				window.localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY,
+					String(sidebar.getBoundingClientRect().width));
+			} catch (e) {
+				// Not fatal.
+			}
+			if (map) {
+				map.resize();
+			}
+		};
+		handle.addEventListener('pointerdown', function (e) {
+			if (e.button !== 0) {
+				return;
+			}
+			e.preventDefault();
+			startX = e.clientX;
+			startWidth = sidebar.getBoundingClientRect().width;
+			app.classList.add('nt-resizing');
+			window.addEventListener('pointermove', onMove);
+			window.addEventListener('pointerup', onUp);
+			window.addEventListener('pointercancel', onUp);
+		});
+		handle.addEventListener('dblclick', function () {
+			applySidebarWidth(SIDEBAR_DEFAULT_WIDTH);
+			try {
+				window.localStorage.removeItem(SIDEBAR_WIDTH_STORAGE_KEY);
+			} catch (e) {
+				// Not fatal.
+			}
+			if (map) {
+				map.resize();
+			}
+		});
+		// Keyboard: the separator is focusable and nudges by 16 px.
+		handle.tabIndex = 0;
+		handle.addEventListener('keydown', function (e) {
+			const step = e.key === 'ArrowLeft' ? -16 : e.key === 'ArrowRight' ? 16 : 0;
+			if (!step) {
+				return;
+			}
+			e.preventDefault();
+			const w = applySidebarWidth(sidebar.getBoundingClientRect().width + step);
+			try {
+				window.localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(w));
+			} catch (e2) {
+				// Not fatal.
+			}
+			if (map) {
+				map.resize();
+			}
+		});
+		window.addEventListener('resize', function () {
+			// Keep the map usable if the window shrinks below the saved width.
+			applySidebarWidth(sidebar.getBoundingClientRect().width);
+		});
+	}
+
 	// ---- boot -----------------------------------------------------
 
 	async function start() {
@@ -2213,6 +2200,7 @@
 			console.error('nomadtracks: MapLibre GL failed to load');
 			return;
 		}
+		initSidebarResizer();
 		initMap();
 		document.getElementById('nomadtracks-details-close')
 			.addEventListener('click', function () {

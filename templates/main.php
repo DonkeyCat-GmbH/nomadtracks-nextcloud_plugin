@@ -23,6 +23,9 @@ declare(strict_types=1);
 			<button id="nomadtracks-summary" class="nt-button" type="button" hidden></button>
 		</div>
 	</aside>
+	<div id="nomadtracks-resizer" role="separator" aria-orientation="vertical"
+		aria-label="<?php p($l->t('Resize the sidebar')); ?>"
+		title="<?php p($l->t('Drag to resize, double-click to reset')); ?>"></div>
 	<div id="nomadtracks-main">
 		<div id="nomadtracks-map"></div>
 		<div id="nomadtracks-empty" class="nt-empty" hidden>

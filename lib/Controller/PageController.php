@@ -32,6 +32,11 @@ class PageController extends Controller {
 		Util::addScript(Application::APP_ID, 'formats');
 		Util::addScript(Application::APP_ID, 'stats');
 		Util::addScript(Application::APP_ID, 'webdav');
+		// Add-ons register themselves with js/addons.js; each one is
+		// its own file so a feature only some users want stays out of
+		// main.js. Order: registry, then the add-ons, then main.
+		Util::addScript(Application::APP_ID, 'addons');
+		Util::addScript(Application::APP_ID, 'addons/fahrtenprotokoll');
 		Util::addScript(Application::APP_ID, 'main');
 		Util::addStyle(Application::APP_ID, 'vendor/maplibre-gl/maplibre-gl');
 		Util::addStyle(Application::APP_ID, 'main');

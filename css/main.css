@@ -27,10 +27,39 @@
 	display: flex;
 	flex-direction: column;
 	width: 300px;
-	min-width: 220px;
+	min-width: 200px;
 	flex-shrink: 0;
-	border-right: 1px solid var(--color-border);
 	background-color: var(--color-main-background);
+}
+
+/* Drag handle between the sidebar and the map. It carries the
+   sidebar's border so the line stays exactly at the edge. */
+#nomadtracks-resizer {
+	flex: none;
+	width: 7px;
+	margin-left: -3px;
+	margin-right: -3px;
+	z-index: 6;
+	cursor: col-resize;
+	background: linear-gradient(to right,
+		transparent 3px, var(--color-border) 3px, var(--color-border) 4px, transparent 4px);
+	touch-action: none;
+}
+
+#nomadtracks-resizer:hover,
+#nomadtracks-app.nt-resizing #nomadtracks-resizer {
+	background: var(--color-primary-element, #0082c9);
+	opacity: 0.6;
+}
+
+#nomadtracks-app.nt-resizing {
+	cursor: col-resize;
+	user-select: none;
+	-webkit-user-select: none;
+}
+
+#nomadtracks-app.nt-resizing #nomadtracks-map {
+	pointer-events: none;
 }
 
 #nomadtracks-tree {
@@ -816,15 +845,81 @@ details.nt-folder > summary:hover {
 	gap: 8px;
 }
 
-.nt-logbook {
+/* Add-ons menu at the end of the summary: one small button, the
+   list opens below it; an opened add-on gets a boxed panel. */
+.nt-addons {
 	margin-top: 12px;
+}
+
+.nt-addons-bar {
+	position: relative;
+}
+
+.nt-addons-toggle {
+	font-size: 0.9em;
+}
+
+.nt-addons-menu {
+	position: absolute;
+	left: 0;
+	top: calc(100% + 4px);
+	z-index: 20;
+	min-width: 240px;
+	max-width: 100%;
+	margin: 0;
+	padding: 4px;
+	list-style: none;
+	border-radius: var(--border-radius-large, 10px);
+	background-color: var(--color-main-background);
+	box-shadow: 0 2px 9px var(--color-box-shadow);
+	border: 1px solid var(--color-border);
+}
+
+.nt-addons-item {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	width: 100%;
+	margin: 0;
+	padding: 6px 8px;
+	border: none;
+	border-radius: var(--border-radius);
+	background: transparent;
+	color: var(--color-main-text);
+	text-align: left;
+	cursor: pointer;
+}
+
+.nt-addons-item:hover {
+	background-color: var(--color-background-hover);
+}
+
+.nt-addons-item-title {
+	font-weight: 500;
+}
+
+.nt-addons-item-desc {
+	font-size: 0.85em;
+	color: var(--color-text-maxcontrast);
+}
+
+.nt-addon-panel {
+	margin-top: 8px;
 	padding: 10px;
 	border-radius: var(--border-radius-large, 10px);
 	background-color: var(--color-background-hover);
 }
 
-.nt-logbook h4 {
-	margin: 0 0 4px;
+.nt-addon-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+	margin-bottom: 4px;
+}
+
+.nt-addon-header h4 {
+	margin: 0;
 	font-size: 0.95em;
 }
 
