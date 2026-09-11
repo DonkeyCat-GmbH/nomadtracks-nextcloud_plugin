@@ -52,6 +52,7 @@ class StateController extends Controller {
 		return new JSONResponse([
 			'tracks' => self::pathList($data['tracks'] ?? null),
 			'hiddenPois' => self::pathList($data['hiddenPois'] ?? null),
+			'selected' => self::singlePath($data['selected'] ?? null),
 		]);
 	}
 
@@ -72,6 +73,7 @@ class StateController extends Controller {
 		$clean = [
 			'tracks' => self::pathList($body['tracks'] ?? null),
 			'hiddenPois' => self::pathList($body['hiddenPois'] ?? null),
+			'selected' => self::singlePath($body['selected'] ?? null),
 		];
 		$this->config->setUserValue(
 			$this->userId,
@@ -80,6 +82,12 @@ class StateController extends Controller {
 			json_encode($clean, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
 		);
 		return new JSONResponse($clean);
+	}
+
+	/** One path or null, with the same rules as pathList. */
+	private static function singlePath(mixed $value): ?string {
+		$list = self::pathList(is_string($value) ? [$value] : null);
+		return $list[0] ?? null;
 	}
 
 	/**

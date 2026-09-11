@@ -422,6 +422,9 @@
 	}
 
 	function markActive(item) {
+		if (item === selectedItem) {
+			return;
+		}
 		if (selectedItem && selectedItem.el) {
 			selectedItem.el.classList.remove('nt-active');
 		}
@@ -429,6 +432,7 @@
 		if (item && item.el) {
 			item.el.classList.add('nt-active');
 		}
+		scheduleStateSave();
 	}
 
 	function setBusy(item, busy) {
@@ -453,7 +457,7 @@
 	 * selection comes back on every device. Tracks default to hidden
 	 * and POIs to shown, so each list only holds the exceptions.
 	 */
-	let persisted = { tracks: [], hiddenPois: [] };
+	let persisted = { tracks: [], hiddenPois: [], selected: null };
 	let stateSaveTimer = null;
 
 	function stateUrl() {
@@ -472,6 +476,7 @@
 			persisted = {
 				tracks: Array.isArray(data.tracks) ? data.tracks : [],
 				hiddenPois: Array.isArray(data.hiddenPois) ? data.hiddenPois : [],
+				selected: typeof data.selected === 'string' ? data.selected : null,
 			};
 		} catch (e) {
 			// Not fatal: the page just starts with nothing ticked.
@@ -507,6 +512,10 @@
 			hiddenPois: items.poi.filter(function (i) {
 				return !i.checked;
 			}).map(function (i) { return i.path; }),
+			// The highlighted track, so it comes back highlighted too.
+			selected: selectedItem && selectedItem.kind === 'track'
+				&& selectedItem.checked && !selectedItem.external
+				? selectedItem.path : null,
 		};
 		try {
 			const res = await fetch(stateUrl(), {
@@ -1232,7 +1241,7 @@
 		}
 	}
 
-	async function selectTrack(item) {
+	async function selectTrack(item, options) {
 		setBusy(item, true);
 		await loadTrack(item);
 		setBusy(item, false);
@@ -1245,7 +1254,9 @@
 			await setTracksShown([item], true);
 		}
 		setSelectedFeature(item.feature);
-		fitBounds(boundsOfSegments(item.segments));
+		if (!(options && options.keepView)) {
+			fitBounds(boundsOfSegments(item.segments));
+		}
 		showTrackDetails(item);
 	}
 
@@ -2385,6 +2396,18 @@
 			await setTracksShown(restoredTracks, true);
 		}
 		updateFolderBoxes();
+		// The track that was highlighted last time comes back with its
+		// details open, without zooming away from the overall view.
+		const remembered = persisted.selected
+			? items.track.find(function (t) {
+				return t.path === persisted.selected && t.checked && t.loaded;
+			})
+			: null;
+		if (remembered) {
+			markActive(remembered);
+			revealItem(remembered);
+			await selectTrack(remembered, { keepView: true });
+		}
 
 		if (!userMovedMap) {
 			const b = new maplibregl.LngLatBounds();
