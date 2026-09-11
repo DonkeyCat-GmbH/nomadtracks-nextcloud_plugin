@@ -20,6 +20,7 @@ declare(strict_types=1);
 			<span class="nt-hint">
 				<?php p($l->t('Tick a track to draw it on the map.')); ?>
 			</span>
+			<button id="nomadtracks-summary" class="nt-button" type="button" hidden></button>
 		</div>
 	</aside>
 	<div id="nomadtracks-main">

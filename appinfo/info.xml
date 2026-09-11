@@ -13,7 +13,14 @@ into the `NomadTracks/` folder of your Nextcloud files.
 - POIs (GeoJSON) are placed as markers when the page loads
 - A details pane shows the selected track's stats and an elevation profile,
   computed with the same elevation filter the mobile app uses
-- Standard / Terrain map type switcher, remembered per browser
+- Standard / Terrain map type switcher and a direction-of-travel arrows
+  toggle, remembered per browser
+- Which tracks and POIs are shown is saved per user, so the same selection
+  comes back on every device; folders have a select-all box
+- A summary of all shown tracks (distance, time, elevation, categories) with
+  an export of the selection as an Austrian practice-driving logbook
+  (Fahrtenprotokoll gemäß § 19 Abs. 8 FSG) — printable / PDF and CSV
+- "Open in NomadTracks" for GPX files in the Files app
 - Track colors come from the `.nomadmeta.json` sidecars written by the app
 - Routes (`.nomadroute` packages) are drawn from the GPX embedded in the package
 - Custom map packages (`.nomadmap`) are listed but not rendered
@@ -21,7 +28,7 @@ into the `NomadTracks/` folder of your Nextcloud files.
 This app is read-only: it never modifies the synced files. It requires the
 NomadTracks mobile app to have synced a library to this Nextcloud account.
 The base map is loaded from map.nomadtracks.app.]]></description>
-	<version>0.2.0</version>
+	<version>0.3.0</version>
 	<licence>agpl</licence>
 	<author mail="office@donkeycat.com">DonkeyCat GmbH</author>
 	<namespace>NomadTracks</namespace>

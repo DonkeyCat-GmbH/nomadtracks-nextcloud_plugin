@@ -33,6 +33,7 @@
 		terrain: 'https://map.nomadtracks.app/style-topo.json?webkey=' + WEB_KEY,
 	};
 	const MAP_TYPE_STORAGE_KEY = 'nomadtracks-map-type';
+	const ARROWS_STORAGE_KEY = 'nomadtracks-arrows';
 
 	const FETCH_CONCURRENCY = 6;
 
@@ -49,6 +50,9 @@
 	let mapReady = false;
 	let mapType = 'standard';
 	let mapTypeButtons = {};
+	/** Direction arrows along every drawn track (a per-browser choice). */
+	let arrowsOn = false;
+	let arrowsButton = null;
 	const items = { track: [], poi: [], map: [], route: [] };
 	const sidecarPaths = new Set();
 	let selectedItem = null;
@@ -146,12 +150,77 @@
 			section.className = 'nt-root';
 			section.open = false;
 			const summary = document.createElement('summary');
+			if (hasVisibilityToggle(rootNode.kind)) {
+				summary.appendChild(makeFolderBox(rootNode, rootNode.kind));
+			}
 			const h = document.createElement('h3');
 			h.textContent = rootNode.name + ' (' + countItems(rootNode) + ')';
 			summary.appendChild(h);
 			section.appendChild(summary);
-			section.appendChild(renderFolderContents(rootNode));
+			section.appendChild(renderFolderContents(rootNode, rootNode.kind));
 			container.appendChild(section);
+		}
+		updateFolderBoxes();
+	}
+
+	/** Tracks and POIs can be shown / hidden; maps and routes cannot. */
+	function hasVisibilityToggle(kind) {
+		return kind === 'track' || kind === 'poi';
+	}
+
+	/** Every item of `kind` below `node`, subfolders included. */
+	function itemsUnder(node, kind, out) {
+		out = out || [];
+		for (const item of node.items) {
+			if (item.kind === kind) {
+				out.push(item);
+			}
+		}
+		for (const folder of node.folders) {
+			itemsUnder(folder, kind, out);
+		}
+		return out;
+	}
+
+	/** Registered folder / root checkboxes, for the tri-state refresh. */
+	const folderBoxes = [];
+
+	/**
+	 * A select-all checkbox for a folder (or a root): ticks or unticks
+	 * everything beneath it, like the folder toggle in the app. Lives
+	 * inside the <summary>, so clicks must not bubble up and fold the
+	 * folder.
+	 */
+	function makeFolderBox(node, kind) {
+		const box = document.createElement('input');
+		box.type = 'checkbox';
+		box.className = 'nt-check nt-check-folder';
+		box.title = kind === 'track'
+			? tr('Show all tracks in this folder on the map')
+			: tr('Show all POIs in this folder on the map');
+		box.setAttribute('aria-label', box.title + ': ' + node.name);
+		box.addEventListener('click', function (e) {
+			e.stopPropagation();
+		});
+		box.addEventListener('change', function () {
+			const list = itemsUnder(node, kind);
+			if (kind === 'track') {
+				setTracksShown(list, box.checked);
+			} else {
+				setPoisShown(list, box.checked);
+			}
+		});
+		folderBoxes.push({ box: box, node: node, kind: kind });
+		return box;
+	}
+
+	function updateFolderBoxes() {
+		for (const entry of folderBoxes) {
+			const list = itemsUnder(entry.node, entry.kind);
+			const n = list.filter(function (i) { return i.checked; }).length;
+			entry.box.disabled = list.length === 0;
+			entry.box.checked = n > 0 && n === list.length;
+			entry.box.indeterminate = n > 0 && n < list.length;
 		}
 	}
 
@@ -163,7 +232,7 @@
 		return n;
 	}
 
-	function renderFolderContents(node) {
+	function renderFolderContents(node, kind) {
 		const wrap = document.createElement('div');
 		wrap.className = 'nt-children';
 		for (const folder of node.folders) {
@@ -171,9 +240,16 @@
 			details.open = false;
 			details.className = 'nt-folder';
 			const summary = document.createElement('summary');
-			summary.textContent = folder.name;
+			if (hasVisibilityToggle(kind)) {
+				summary.appendChild(makeFolderBox(folder, kind));
+			}
+			const name = document.createElement('span');
+			name.className = 'nt-folder-name';
+			name.textContent = folder.name;
+			name.title = folder.name;
+			summary.appendChild(name);
 			details.appendChild(summary);
-			details.appendChild(renderFolderContents(folder));
+			details.appendChild(renderFolderContents(folder, kind));
 			wrap.appendChild(details);
 		}
 		for (const item of node.items) {
@@ -192,29 +268,39 @@
 		const label = document.createElement('span');
 		label.className = 'nt-label';
 		label.textContent = item.name;
+		// The label is ellipsised when the sidebar is narrow; hovering
+		// shows the whole name.
+		label.title = item.name;
 		btn.appendChild(label);
 		btn.addEventListener('click', function () {
 			onItemClick(item);
 		});
 		item.el = btn;
 
-		if (item.kind !== 'track') {
+		if (!hasVisibilityToggle(item.kind)) {
 			return btn;
 		}
 
-		// Tracks are opt-in, like the mobile app's "Show on Map"
-		// toggle: nothing is drawn until its box is ticked, and the
-		// GPX is only fetched at that moment.
+		// Tracks and POIs carry a "Show on Map" box like the app's
+		// toggle. The initial state comes from the user's saved
+		// selection (applyPersistedState); a track's GPX is fetched
+		// only when it is first shown.
 		const row = document.createElement('div');
 		row.className = 'nt-row';
 		const box = document.createElement('input');
 		box.type = 'checkbox';
 		box.className = 'nt-check';
-		box.checked = false;
+		box.checked = !!item.checked;
 		box.setAttribute('aria-label', tr('Show on map') + ': ' + item.name);
-		box.title = tr('Show this track on the map');
+		box.title = item.kind === 'track'
+			? tr('Show this track on the map')
+			: tr('Show this POI on the map');
 		box.addEventListener('change', function () {
-			onTrackToggle(item, box.checked);
+			if (item.kind === 'track') {
+				setTracksShown([item], box.checked);
+			} else {
+				setPoisShown([item], box.checked);
+			}
 		});
 		item.checkbox = box;
 		row.appendChild(box);
@@ -301,6 +387,89 @@
 		}
 	}
 
+	// ---- saved selection (per user, server side) -------------------
+
+	/**
+	 * Which tracks are ticked and which POIs are unticked, stored in
+	 * the user's Nextcloud settings by StateController so the same
+	 * selection comes back on every device. Tracks default to hidden
+	 * and POIs to shown, so each list only holds the exceptions.
+	 */
+	let persisted = { tracks: [], hiddenPois: [] };
+	let stateSaveTimer = null;
+
+	function stateUrl() {
+		return OC.generateUrl('/apps/nomadtracks/state');
+	}
+
+	async function loadPersistedState() {
+		try {
+			const res = await fetch(stateUrl(), {
+				headers: { requesttoken: OC.requestToken, Accept: 'application/json' },
+			});
+			if (!res.ok) {
+				throw new Error('GET state failed: ' + res.status);
+			}
+			const data = await res.json();
+			persisted = {
+				tracks: Array.isArray(data.tracks) ? data.tracks : [],
+				hiddenPois: Array.isArray(data.hiddenPois) ? data.hiddenPois : [],
+			};
+		} catch (e) {
+			// Not fatal: the page just starts with nothing ticked.
+			console.warn('nomadtracks: could not load the saved selection', e);
+		}
+	}
+
+	function applyPersistedState() {
+		const shown = new Set(persisted.tracks);
+		const hidden = new Set(persisted.hiddenPois);
+		for (const item of items.track) {
+			item.checked = shown.has(item.path);
+		}
+		for (const item of items.poi) {
+			item.checked = !hidden.has(item.path);
+		}
+	}
+
+	/** Coalesce a burst of toggles (a folder select-all) into one PUT. */
+	function scheduleStateSave() {
+		if (stateSaveTimer) {
+			clearTimeout(stateSaveTimer);
+		}
+		stateSaveTimer = setTimeout(saveState, 400);
+	}
+
+	async function saveState() {
+		stateSaveTimer = null;
+		const body = {
+			tracks: items.track.filter(function (i) {
+				return i.checked && !i.external;
+			}).map(function (i) { return i.path; }),
+			hiddenPois: items.poi.filter(function (i) {
+				return !i.checked;
+			}).map(function (i) { return i.path; }),
+		};
+		try {
+			const res = await fetch(stateUrl(), {
+				method: 'PUT',
+				headers: {
+					requesttoken: OC.requestToken,
+					'Content-Type': 'application/json',
+					Accept: 'application/json',
+				},
+				body: JSON.stringify(body),
+			});
+			if (!res.ok) {
+				throw new Error('PUT state failed: ' + res.status);
+			}
+			persisted = body;
+		} catch (e) {
+			console.warn('nomadtracks: could not save the selection', e);
+			showToast(tr('Your selection could not be saved.'));
+		}
+	}
+
 	// ---- map ------------------------------------------------------
 
 	function storedMapType() {
@@ -380,8 +549,97 @@
 		map.setStyle(MAP_TYPES[type]);
 	}
 
+	function storedArrows() {
+		try {
+			return window.localStorage.getItem(ARROWS_STORAGE_KEY) === '1';
+		} catch (e) {
+			return false;
+		}
+	}
+
+	function rememberArrows(on) {
+		try {
+			window.localStorage.setItem(ARROWS_STORAGE_KEY, on ? '1' : '0');
+		} catch (e) {
+			// Not fatal.
+		}
+	}
+
+	/** Toggle button for the direction arrows, in the control stack. */
+	function ArrowsControl() {}
+
+	ArrowsControl.prototype.onAdd = function () {
+		const container = document.createElement('div');
+		container.className = 'maplibregl-ctrl maplibregl-ctrl-group';
+		const button = document.createElement('button');
+		button.type = 'button';
+		button.className = 'nt-arrows-button';
+		button.title = tr('Show direction of travel');
+		button.setAttribute('aria-label', button.title);
+		button.appendChild(makeEl('span', 'nt-arrows-glyph', '➤'));
+		button.addEventListener('click', function () {
+			setArrows(!arrowsOn);
+		});
+		container.appendChild(button);
+		arrowsButton = button;
+		this._container = container;
+		updateArrowsButton();
+		return container;
+	};
+
+	ArrowsControl.prototype.onRemove = function () {
+		if (this._container && this._container.parentNode) {
+			this._container.parentNode.removeChild(this._container);
+		}
+		arrowsButton = null;
+	};
+
+	function updateArrowsButton() {
+		if (arrowsButton) {
+			arrowsButton.classList.toggle('nt-arrows-active', arrowsOn);
+			arrowsButton.setAttribute('aria-pressed', arrowsOn ? 'true' : 'false');
+		}
+	}
+
+	function setArrows(on) {
+		arrowsOn = !!on;
+		rememberArrows(arrowsOn);
+		updateArrowsButton();
+		if (mapReady && map.getLayer('nt-tracks-arrows')) {
+			map.setLayoutProperty('nt-tracks-arrows', 'visibility',
+				arrowsOn ? 'visible' : 'none');
+		}
+	}
+
+	/**
+	 * The arrow glyph: a white chevron with a dark outline, pointing
+	 * along +x, drawn at 2× for crisp edges. White-on-outline reads on
+	 * any track colour, which is why the icon is not tinted per track.
+	 */
+	function arrowImage() {
+		const size = 32;
+		const canvas = document.createElement('canvas');
+		canvas.width = size;
+		canvas.height = size;
+		const ctx = canvas.getContext('2d');
+		ctx.lineJoin = 'round';
+		ctx.lineCap = 'round';
+		ctx.beginPath();
+		ctx.moveTo(9, 7);
+		ctx.lineTo(23, 16);
+		ctx.lineTo(9, 25);
+		ctx.strokeStyle = 'rgba(0, 0, 0, 0.75)';
+		ctx.lineWidth = 8;
+		ctx.stroke();
+		ctx.strokeStyle = '#ffffff';
+		ctx.lineWidth = 4;
+		ctx.stroke();
+		return ctx.getImageData(0, 0, size, size);
+	}
+
 	function initMap() {
 		mapType = storedMapType();
+		arrowsOn = storedArrows();
 		map = new maplibregl.Map({
 			container: 'nomadtracks-map',
 			style: MAP_TYPES[mapType],
@@ -391,6 +649,7 @@
 		});
 		map.addControl(new MapTypeControl(), 'top-right');
 		map.addControl(new maplibregl.NavigationControl(), 'top-right');
+		map.addControl(new ArrowsControl(), 'top-right');
 		map.addControl(new maplibregl.ScaleControl());
 		map.on('dragstart', function () {
 			userMovedMap = true;
@@ -461,6 +720,30 @@
 			source: 'nt-selected',
 			layout: { 'line-join': 'round', 'line-cap': 'round' },
 			paint: { 'line-color': ['get', 'color'], 'line-width': 4 },
+		});
+		// Direction of travel: one chevron every ~80 px along each
+		// drawn track, rotated with the line (which follows the GPX
+		// point order). Images are dropped by a style switch too, so
+		// the glyph is re-registered here each time.
+		if (!map.hasImage('nt-arrow')) {
+			map.addImage('nt-arrow', arrowImage(), { pixelRatio: 2 });
+		}
+		map.addLayer({
+			id: 'nt-tracks-arrows',
+			type: 'symbol',
+			source: 'nt-tracks',
+			layout: {
+				'symbol-placement': 'line',
+				'symbol-spacing': 80,
+				'icon-image': 'nt-arrow',
+				'icon-size': 0.75,
+				'icon-rotation-alignment': 'map',
+				'icon-pitch-alignment': 'map',
+				'icon-keep-upright': false,
+				'icon-allow-overlap': true,
+				'icon-ignore-placement': true,
+				visibility: arrowsOn ? 'visible' : 'none',
+			},
 		});
 		// Chart scrubber dot, styled like the app's `nomad-cursor`
 		// layer: the track's own colour inside a white ring. Added
@@ -725,8 +1008,11 @@
 			item.marker = new maplibregl.Marker({ color: item.color })
 				.setLngLat([poi.lon, poi.lat])
 				.setPopup(new maplibregl.Popup({ offset: 24 })
-					.setText(poi.name || item.name))
-				.addTo(map);
+					.setText(poi.name || item.name));
+			if (item.checked) {
+				item.marker.addTo(map);
+				item.markerOnMap = true;
+			}
 			item.marker.getElement().addEventListener('click', function () {
 				markActive(item);
 				showPoiDetails(item);
@@ -756,31 +1042,89 @@
 
 	// ---- selection ------------------------------------------------
 
-	async function onTrackToggle(item, checked) {
+	function setChecked(item, checked) {
 		item.checked = checked;
+		if (item.checkbox) {
+			item.checkbox.checked = checked;
+		}
+	}
+
+	/**
+	 * Show or hide a set of tracks (one box, or a whole folder).
+	 * Tracks are fetched on first show, a few at a time; any that
+	 * fail to load are unticked again and reported once.
+	 */
+	async function setTracksShown(list, checked) {
+		for (const item of list) {
+			setChecked(item, checked);
+		}
 		if (checked) {
-			setBusy(item, true);
-			await loadTrack(item);
-			setBusy(item, false);
-			if (!item.loaded) {
-				item.checked = false;
-				if (item.checkbox) {
-					item.checkbox.checked = false;
-				}
-				showToast(tr('Could not load this track.'));
-				updateFooter();
-				return;
+			const pending = list.filter(function (i) {
+				return !i.loaded && !i.failed;
+			});
+			for (const item of pending) {
+				setBusy(item, true);
 			}
-		} else if (selectedItem === item) {
+			await NT.dav.mapLimit(pending, FETCH_CONCURRENCY, async function (item) {
+				await loadTrack(item);
+				setBusy(item, false);
+			});
+			let failed = 0;
+			for (const item of list) {
+				if (!item.loaded) {
+					setChecked(item, false);
+					failed++;
+				}
+			}
+			if (failed === 1 && list.length === 1) {
+				showToast(tr('Could not load this track.'));
+			} else if (failed > 0) {
+				showToast(tr('Some tracks could not be loaded and were left unticked.'));
+			}
+		} else {
 			// Untick the track that is currently highlighted: drop the
 			// highlight and the details panel too, so the map really is
 			// free of it. Other tracks are unaffected.
-			markActive(null);
-			setSelectedFeature(null);
-			hideDetails();
+			if (selectedItem && list.indexOf(selectedItem) !== -1) {
+				markActive(null);
+				setSelectedFeature(null);
+				hideDetails();
+			}
 		}
 		refreshTrackSource();
 		updateFooter();
+		updateFolderBoxes();
+		refreshSummarySection();
+		scheduleStateSave();
+	}
+
+	/** Show or hide POI markers; unloaded POIs are fetched on show. */
+	async function setPoisShown(list, checked) {
+		for (const item of list) {
+			setChecked(item, checked);
+		}
+		if (checked) {
+			await NT.dav.mapLimit(list, FETCH_CONCURRENCY, loadPoi);
+			for (const item of list) {
+				if (item.loaded && item.marker && !item.markerOnMap) {
+					item.marker.addTo(map);
+					item.markerOnMap = true;
+				}
+			}
+		} else {
+			for (const item of list) {
+				if (item.marker && item.markerOnMap) {
+					item.marker.remove();
+					item.markerOnMap = false;
+				}
+				if (selectedItem === item) {
+					markActive(null);
+					hideDetails();
+				}
+			}
+		}
+		updateFolderBoxes();
+		scheduleStateSave();
 	}
 
 	function onItemClick(item) {
@@ -806,19 +1150,20 @@
 			return;
 		}
 		// Selecting implies showing: tick the box if it wasn't.
-		item.checked = true;
-		if (item.checkbox) {
-			item.checkbox.checked = true;
+		if (!item.checked) {
+			await setTracksShown([item], true);
 		}
-		refreshTrackSource();
-		updateFooter();
 		setSelectedFeature(item.feature);
 		fitBounds(boundsOfSegments(item.segments));
 		showTrackDetails(item);
 	}
 
 	async function selectPoi(item) {
-		await loadPoi(item);
+		if (!item.checked) {
+			await setPoisShown([item], true);
+		} else {
+			await loadPoi(item);
+		}
 		if (!item.loaded) {
 			showToast(tr('Could not load this POI.'));
 			return;
@@ -888,7 +1233,11 @@
 		return document.getElementById('nomadtracks-details');
 	}
 
+	/** What the panel currently shows: 'track' | 'summary' | 'other' | null. */
+	let detailsMode = null;
+
 	function hideDetails() {
+		detailsMode = null;
 		const panel = detailsPanel();
 		panel.hidden = true;
 		document.getElementById('nomadtracks-details-body').textContent = '';
@@ -896,7 +1245,8 @@
 		document.getElementById('nomadtracks-app').classList.remove('nt-has-details');
 	}
 
-	function openDetails(title) {
+	function openDetails(title, mode) {
+		detailsMode = mode || 'other';
 		const panel = detailsPanel();
 		panel.hidden = false;
 		document.getElementById('nomadtracks-app').classList.add('nt-has-details');
@@ -992,10 +1342,15 @@
 		const d = item.detail;
 		const gpx = item.gpx;
 		const body = openDetails(
-			(gpx && gpx.name) ? gpx.name : item.name
+			(gpx && gpx.name) ? gpx.name : item.name,
+			'track'
 		);
 		addHeader(body, item, tr('Track'));
 		buildTrackBody(body, item, d, gpx, tr('Recorded'));
+		const summary = renderSelectionSummary();
+		if (summary) {
+			body.appendChild(summary);
+		}
 	}
 
 	function showRouteDetails(item) {
@@ -1153,6 +1508,424 @@
 			const section = addSection(body, tr('Address'));
 			section.appendChild(makeEl('p', 'nt-address', address));
 		}
+	}
+
+	// ---- selection summary + logbook -------------------------------
+
+	const SUMMARY_ID = 'nomadtracks-selection';
+	const LOGBOOK_STORAGE_KEY = 'nomadtracks-logbook';
+
+	/** Ticked tracks whose GPX has been parsed, oldest first. */
+	function shownTracks() {
+		return items.track.filter(function (i) {
+			return i.checked && i.loaded && i.detail;
+		}).sort(function (a, b) {
+			return (a.detail.startedAt || 0) - (b.detail.startedAt || 0);
+		});
+	}
+
+	/**
+	 * Totals over several tracks. Sums only what every summed track
+	 * actually has: a duration total over tracks that carry no
+	 * timestamps would be a silent lie, so each total also reports
+	 * how many tracks it covers.
+	 */
+	function aggregateTracks(list) {
+		const agg = {
+			count: list.length,
+			distanceMeters: 0,
+			durationSeconds: 0, durationCount: 0,
+			movingSeconds: 0, movingCount: 0,
+			gain: 0, gainCount: 0,
+			loss: 0, lossCount: 0,
+			firstStart: null, lastStart: null,
+			categories: {},
+		};
+		for (const t of list) {
+			const d = t.detail;
+			agg.distanceMeters += d.distanceMeters || 0;
+			if (d.durationSeconds !== null) {
+				agg.durationSeconds += d.durationSeconds;
+				agg.durationCount++;
+			}
+			if (d.stats.movingTimeSeconds !== null) {
+				agg.movingSeconds += d.stats.movingTimeSeconds;
+				agg.movingCount++;
+			}
+			if (d.elevationGain !== null) {
+				agg.gain += d.elevationGain;
+				agg.gainCount++;
+			}
+			if (d.elevationLoss !== null) {
+				agg.loss += d.elevationLoss;
+				agg.lossCount++;
+			}
+			if (d.startedAt !== null) {
+				agg.firstStart = agg.firstStart === null
+					? d.startedAt : Math.min(agg.firstStart, d.startedAt);
+				agg.lastStart = agg.lastStart === null
+					? d.startedAt : Math.max(agg.lastStart, d.startedAt);
+			}
+			const key = F.trackCategoryKey(t.sidecar && t.sidecar.category);
+			agg.categories[key] = (agg.categories[key] || 0) + 1;
+		}
+		return agg;
+	}
+
+	function coverageHint(n, total) {
+		return n === total ? null
+			: tr('Only %n of the selected tracks carry this value; the total covers those.')
+				.replace('%n', String(n));
+	}
+
+	/**
+	 * The "Selected tracks" section: totals, a category breakdown and
+	 * the logbook export. Returns null when fewer than two tracks are
+	 * shown — one track's numbers are already its own details.
+	 */
+	function renderSelectionSummary() {
+		const list = shownTracks();
+		if (list.length < 2) {
+			return null;
+		}
+		const agg = aggregateTracks(list);
+		const section = makeEl('section', 'nt-section nt-selection');
+		section.id = SUMMARY_ID;
+		section.appendChild(makeEl('h3', null,
+			tr('Selected tracks') + ' (' + agg.count + ')'));
+
+		const grid = makeEl('div', 'nt-stats');
+		addStat(grid, tr('Distance'), S.formatDistance(agg.distanceMeters));
+		addStat(grid, tr('Duration'), agg.durationCount > 0
+			? S.formatDuration(agg.durationSeconds) : null,
+			coverageHint(agg.durationCount, agg.count));
+		addStat(grid, tr('Time in Motion'), agg.movingCount > 0
+			? S.formatDuration(agg.movingSeconds) : null,
+			coverageHint(agg.movingCount, agg.count));
+		addStat(grid, tr('Avg Speed'), agg.durationCount > 0 && agg.durationSeconds > 0
+			? S.formatSpeed(agg.distanceMeters / agg.durationSeconds) : null,
+			tr('Total distance over total duration.'));
+		addStat(grid, tr('Elev. Gain'), agg.gainCount > 0
+			? S.formatElevation(agg.gain) : null,
+			coverageHint(agg.gainCount, agg.count));
+		addStat(grid, tr('Elev. Loss'), agg.lossCount > 0
+			? S.formatElevation(agg.loss) : null,
+			coverageHint(agg.lossCount, agg.count));
+		addStat(grid, tr('First'), formatDateTime(agg.firstStart));
+		addStat(grid, tr('Last'), formatDateTime(agg.lastStart));
+		section.appendChild(grid);
+
+		const keys = Object.keys(agg.categories).sort(function (a, b) {
+			return agg.categories[b] - agg.categories[a];
+		});
+		if (keys.length > 1 || keys[0] !== 'unspecified') {
+			const list2 = makeEl('ul', 'nt-list nt-categories');
+			for (const key of keys) {
+				const li = makeEl('li');
+				const icon = makeEl('span', 'nt-dot nt-icon nt-cat-' + key);
+				icon.style.backgroundColor = 'currentColor';
+				li.appendChild(icon);
+				li.appendChild(makeEl('span', null,
+					tr(F.trackCategoryName(key)) + ' × ' + agg.categories[key]));
+				list2.appendChild(li);
+			}
+			section.appendChild(list2);
+		}
+
+		section.appendChild(renderLogbookExport(list, agg));
+		return section;
+	}
+
+	/**
+	 * Keep whatever is open in sync with the selection: the summary
+	 * panel re-renders, a track's details get their trailing summary
+	 * section swapped, and the footer button follows the count.
+	 */
+	function refreshSummarySection() {
+		const count = shownTracks().length;
+		const button = document.getElementById('nomadtracks-summary');
+		if (button) {
+			button.hidden = count < 2;
+			button.textContent = tr('Summary of %n tracks').replace('%n', String(count));
+		}
+		if (detailsMode === 'summary') {
+			if (count < 2) {
+				hideDetails();
+			} else {
+				showSummaryPanel();
+			}
+		} else if (detailsMode === 'track') {
+			const body = document.getElementById('nomadtracks-details-body');
+			const old = document.getElementById(SUMMARY_ID);
+			const fresh = renderSelectionSummary();
+			if (old && fresh) {
+				body.replaceChild(fresh, old);
+			} else if (old) {
+				body.removeChild(old);
+			} else if (fresh) {
+				body.appendChild(fresh);
+			}
+		}
+	}
+
+	function showSummaryPanel() {
+		const section = renderSelectionSummary();
+		if (!section) {
+			return;
+		}
+		const body = openDetails(tr('Selected tracks'), 'summary');
+		// The section brings its own heading; the panel title has it.
+		section.removeChild(section.querySelector('h3'));
+		body.appendChild(section);
+	}
+
+	// ---- Fahrtenprotokoll (Austrian practice-drive logbook) ---------
+	//
+	// Layout follows the "Fahrtenprotokoll gemäß § 19 Abs. 8 FSG" sheet
+	// the driving schools hand out for L / L17 practice drives: Datum,
+	// gefahrene km, Kilometerstand von/bis, Kfz-Kennzeichen, Tageszeit,
+	// Fahrstrecke/-ziel, Straßenzustand/Witterung, and one signature
+	// column each for Begleiter and Bewerber. A GPX only knows some of
+	// these; the rest stay empty to be filled in by hand (the sheet
+	// has to be signed by hand anyway). The sheet itself is German
+	// regardless of the UI language — it is an Austrian form.
+
+	function storedLogbookFields() {
+		try {
+			const raw = window.localStorage.getItem(LOGBOOK_STORAGE_KEY);
+			const v = raw ? JSON.parse(raw) : null;
+			return {
+				name: v && typeof v.name === 'string' ? v.name : '',
+				plate: v && typeof v.plate === 'string' ? v.plate : '',
+			};
+		} catch (e) {
+			return { name: '', plate: '' };
+		}
+	}
+
+	function rememberLogbookFields(fields) {
+		try {
+			window.localStorage.setItem(LOGBOOK_STORAGE_KEY, JSON.stringify(fields));
+		} catch (e) {
+			// Fine — they will just have to be typed again next time.
+		}
+	}
+
+	function renderLogbookExport(list, agg) {
+		const wrap = makeEl('div', 'nt-logbook');
+		wrap.appendChild(makeEl('h4', null, tr('Practice-driving logbook')));
+		wrap.appendChild(makeEl('p', 'nt-hint',
+			tr('Exports the selected tracks as an Austrian Fahrtenprotokoll (§ 19 Abs. 8 FSG). Odometer readings, road conditions and signatures are left blank to fill in by hand.')));
+
+		const stored = storedLogbookFields();
+		const form = makeEl('div', 'nt-logbook-fields');
+		const nameInput = makeEl('input');
+		nameInput.type = 'text';
+		nameInput.placeholder = tr('Name of the learner driver');
+		nameInput.value = stored.name;
+		nameInput.setAttribute('aria-label', nameInput.placeholder);
+		const plateInput = makeEl('input');
+		plateInput.type = 'text';
+		plateInput.placeholder = tr('Licence plate (Kfz-Kennzeichen)');
+		plateInput.value = stored.plate;
+		plateInput.setAttribute('aria-label', plateInput.placeholder);
+		form.appendChild(nameInput);
+		form.appendChild(plateInput);
+		wrap.appendChild(form);
+
+		const readFields = function () {
+			const fields = { name: nameInput.value.trim(), plate: plateInput.value.trim() };
+			rememberLogbookFields(fields);
+			return fields;
+		};
+
+		const actions = makeEl('div', 'nt-logbook-actions');
+		const printBtn = makeEl('button', 'nt-button', tr('Print / save as PDF'));
+		printBtn.type = 'button';
+		printBtn.addEventListener('click', function () {
+			openPrintableLogbook(list, agg, readFields());
+		});
+		const csvBtn = makeEl('button', 'nt-button', tr('Download CSV'));
+		csvBtn.type = 'button';
+		csvBtn.addEventListener('click', function () {
+			downloadLogbookCsv(list, readFields());
+		});
+		actions.appendChild(printBtn);
+		actions.appendChild(csvBtn);
+		wrap.appendChild(actions);
+
+		const untimed = list.filter(function (t) {
+			return t.detail.startedAt === null;
+		}).length;
+		if (untimed > 0) {
+			wrap.appendChild(makeEl('p', 'nt-hint',
+				tr('%n of the selected tracks have no timestamps and will be listed without a date.')
+					.replace('%n', String(untimed))));
+		}
+		return wrap;
+	}
+
+	function pad2(n) {
+		return n < 10 ? '0' + n : String(n);
+	}
+
+	function formatDateDE(epochSeconds) {
+		if (!Number.isFinite(epochSeconds)) {
+			return '';
+		}
+		const d = new Date(epochSeconds * 1000);
+		return pad2(d.getDate()) + '.' + pad2(d.getMonth() + 1) + '.' + d.getFullYear();
+	}
+
+	function formatTimeDE(epochSeconds) {
+		if (!Number.isFinite(epochSeconds)) {
+			return '';
+		}
+		const d = new Date(epochSeconds * 1000);
+		return pad2(d.getHours()) + ':' + pad2(d.getMinutes());
+	}
+
+	/** km with one decimal and a German decimal comma. */
+	function formatKmDE(meters) {
+		return (Math.round(meters / 100) / 10).toFixed(1).replace('.', ',');
+	}
+
+	/** One sheet row per track, in the column order of the form. */
+	function logbookRows(list, fields) {
+		return list.map(function (t) {
+			const d = t.detail;
+			const start = d.startedAt;
+			const end = start !== null && d.durationSeconds !== null
+				? start + d.durationSeconds : null;
+			let time = formatTimeDE(start);
+			if (end !== null) {
+				time += ' – ' + formatTimeDE(end);
+			}
+			const address = t.sidecar ? t.sidecar.address : null;
+			const from = address ? (address.city || address.street || '') : '';
+			const gpxName = t.gpx && t.gpx.name ? t.gpx.name : t.name;
+			const route = from ? gpxName + ' (ab ' + from + ')' : gpxName;
+			return {
+				date: formatDateDE(start),
+				km: formatKmDE(d.distanceMeters || 0),
+				odoFrom: '',
+				odoTo: '',
+				plate: fields.plate,
+				time: time,
+				route: route,
+				conditions: '',
+				sortKey: start || 0,
+			};
+		});
+	}
+
+	function escapeHtml(text) {
+		return String(text)
+			.replace(/&/g, '&amp;').replace(/</g, '&lt;')
+			.replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+	}
+
+	function openPrintableLogbook(list, agg, fields) {
+		const rows = logbookRows(list, fields);
+		const heads = ['Datum', 'gefahrene km', 'Kilometerstand von', 'Kilometerstand bis',
+			'Kfz-Kennzeichen', 'Tageszeit', 'Fahrstrecke/-ziel', 'Straßenzustand, Witterung',
+			'Unterschrift Begleiter/in', 'Unterschrift Bewerber/in'];
+		let html = '<!DOCTYPE html><html lang="de"><head><meta charset="utf-8">'
+			+ '<title>Fahrtenprotokoll</title><style>'
+			+ '@page{size:A4 landscape;margin:12mm}'
+			+ 'body{font:11pt/1.35 -apple-system,"Segoe UI",Helvetica,Arial,sans-serif;color:#000;margin:0}'
+			+ 'h1{font-size:15pt;margin:0 0 2mm}'
+			+ '.meta{display:flex;gap:12mm;margin:0 0 4mm;font-size:11pt}'
+			+ '.meta span{border-bottom:1px solid #000;min-width:50mm;display:inline-block;padding:0 2mm}'
+			+ 'table{border-collapse:collapse;width:100%;font-size:9.5pt}'
+			+ 'th,td{border:1px solid #000;padding:1.6mm 1.4mm;vertical-align:top;text-align:left}'
+			+ 'th{background:#eee;font-weight:600}'
+			+ 'td.num{text-align:right;white-space:nowrap}'
+			+ 'td.sig{min-width:26mm;height:9mm}'
+			+ 'tfoot td{font-weight:600}'
+			+ '.note{margin-top:4mm;font-size:8.5pt;color:#333}'
+			+ '.screen{margin:0 0 4mm;padding:2mm 3mm;background:#fff3cd;border:1px solid #d9b84a;font-size:10pt}'
+			+ '@media print{.screen{display:none}}'
+			+ '</style></head><body>'
+			+ '<p class="screen">Zum Speichern als PDF: Drucken (⌘P / Strg+P) und als Ziel „Als PDF sichern“ wählen.</p>'
+			+ '<h1>Fahrtenprotokoll gemäß § 19 Abs. 8 FSG</h1>'
+			+ '<div class="meta">'
+			+ '<div>Name: <span>' + escapeHtml(fields.name) + '</span></div>'
+			+ '<div>Kfz-Kennzeichen: <span>' + escapeHtml(fields.plate) + '</span></div>'
+			+ '<div>Gefahrene Gesamtkilometer: <span>' + formatKmDE(agg.distanceMeters) + ' km</span></div>'
+			+ '</div><table><thead><tr>';
+		for (const h of heads) {
+			html += '<th>' + escapeHtml(h) + '</th>';
+		}
+		html += '</tr></thead><tbody>';
+		for (const r of rows) {
+			html += '<tr>'
+				+ '<td>' + escapeHtml(r.date) + '</td>'
+				+ '<td class="num">' + escapeHtml(r.km) + '</td>'
+				+ '<td class="num"></td><td class="num"></td>'
+				+ '<td>' + escapeHtml(r.plate) + '</td>'
+				+ '<td>' + escapeHtml(r.time) + '</td>'
+				+ '<td>' + escapeHtml(r.route) + '</td>'
+				+ '<td></td><td class="sig"></td><td class="sig"></td>'
+				+ '</tr>';
+		}
+		html += '</tbody><tfoot><tr><td>Summe</td><td class="num">'
+			+ formatKmDE(agg.distanceMeters) + '</td><td colspan="8">'
+			+ rows.length + ' Fahrten</td></tr></tfoot></table>'
+			+ '<p class="note">Das Fahrtenprotokoll ist wahrheitsgetreu zu führen und für jede Fahrt '
+			+ 'von Begleiter/in und Bewerber/in zu unterschreiben. Kilometerstand und '
+			+ 'Straßenzustand/Witterung sind händisch zu ergänzen. Erstellt mit NomadTracks am '
+			+ formatDateDE(Date.now() / 1000) + '.</p>'
+			+ '</body></html>';
+
+		const url = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
+		const w = window.open(url, '_blank');
+		if (!w) {
+			showToast(tr('The browser blocked the print window. Allow pop-ups for this site and try again.'));
+			return;
+		}
+		// Kick off the print dialog once the sheet has rendered; if
+		// the browser does not fire this, the sheet explains ⌘P.
+		w.addEventListener('load', function () {
+			setTimeout(function () {
+				try {
+					w.print();
+				} catch (e) {
+					// The on-screen hint covers this case.
+				}
+			}, 250);
+		});
+	}
+
+	function downloadLogbookCsv(list, fields) {
+		const rows = logbookRows(list, fields);
+		const heads = ['Datum', 'gefahrene km', 'Kilometerstand von', 'Kilometerstand bis',
+			'Kfz-Kennzeichen', 'Tageszeit', 'Fahrstrecke/-ziel', 'Straßenzustand, Witterung',
+			'Unterschrift Begleiter/in', 'Unterschrift Bewerber/in'];
+		const cell = function (v) {
+			return '"' + String(v).replace(/"/g, '""') + '"';
+		};
+		const lines = [];
+		if (fields.name) {
+			lines.push(cell('Name') + ';' + cell(fields.name));
+		}
+		lines.push(heads.map(cell).join(';'));
+		for (const r of rows) {
+			lines.push([r.date, r.km, r.odoFrom, r.odoTo, r.plate, r.time, r.route,
+				r.conditions, '', ''].map(cell).join(';'));
+		}
+		// BOM + semicolons: what German-locale spreadsheets expect.
+		const blob = new Blob(['\ufeff' + lines.join('\r\n') + '\r\n'],
+			{ type: 'text/csv;charset=utf-8' });
+		const a = document.createElement('a');
+		a.href = URL.createObjectURL(blob);
+		a.download = 'Fahrtenprotokoll-' + formatDateDE(Date.now() / 1000).replace(/\./g, '-') + '.csv';
+		document.body.appendChild(a);
+		a.click();
+		document.body.removeChild(a);
+		setTimeout(function () {
+			URL.revokeObjectURL(a.href);
+		}, 10000);
 	}
 
 	// ---- elevation profile (inline SVG, no charting library) -------
@@ -1351,6 +2124,88 @@
 		container.appendChild(p);
 	}
 
+	// ---- ?file= (arriving from the Files app) ----------------------
+
+	/** Unfold every folder above an item and scroll it into view. */
+	function revealItem(item) {
+		const container = document.getElementById('nomadtracks-tree');
+		let el = item.el;
+		while (el && el !== container) {
+			if (el.tagName === 'DETAILS') {
+				el.open = true;
+			}
+			el = el.parentElement;
+		}
+		if (item.el && typeof item.el.scrollIntoView === 'function') {
+			item.el.scrollIntoView({ block: 'center' });
+		}
+	}
+
+	/**
+	 * The Files app's "Open in NomadTracks" lands here with
+	 * `?file=/path/to/track.gpx`. A file that is part of the library
+	 * is simply selected; any other GPX is fetched and shown as a
+	 * temporary track under its own "Opened file" heading. Temporary
+	 * tracks are never written to the saved selection.
+	 */
+	async function openRequestedFile() {
+		let file;
+		try {
+			file = new URLSearchParams(window.location.search).get('file');
+		} catch (e) {
+			return false;
+		}
+		if (!file) {
+			return false;
+		}
+		const path = file.replace(/^\/+/, '');
+		const hit = items.track.find(function (i) {
+			return i.path === path;
+		});
+		if (hit) {
+			revealItem(hit);
+			await selectTrack(hit);
+			return true;
+		}
+		if (!/\.gpx$/i.test(path)) {
+			showToast(tr('Only GPX files can be opened here.'));
+			return false;
+		}
+		const base = path.substring(path.lastIndexOf('/') + 1);
+		const item = {
+			kind: 'track',
+			name: base.substring(0, base.length - 4),
+			path: path,
+			size: 0,
+			sidecarPath: null,
+			loaded: false,
+			failed: false,
+			checked: false,
+			color: null,
+			el: null,
+			checkbox: null,
+			loadPromise: null,
+			sidecarPromise: null,
+			external: true,
+		};
+		items.track.push(item);
+		const node = { name: tr('Opened file'), kind: 'track', folders: [], items: [item] };
+		const container = document.getElementById('nomadtracks-tree');
+		const section = document.createElement('details');
+		section.className = 'nt-root nt-root-external';
+		section.open = true;
+		const summary = document.createElement('summary');
+		const h = document.createElement('h3');
+		h.textContent = node.name;
+		summary.appendChild(h);
+		section.appendChild(summary);
+		section.appendChild(renderFolderContents(node, 'track'));
+		container.insertBefore(section, container.firstChild);
+		loadSidecar(item);
+		await selectTrack(item);
+		return item.loaded;
+	}
+
 	// ---- boot -----------------------------------------------------
 
 	async function start() {
@@ -1365,10 +2220,17 @@
 				setSelectedFeature(null);
 				hideDetails();
 			});
+		document.getElementById('nomadtracks-summary')
+			.addEventListener('click', function () {
+				markActive(null);
+				setSelectedFeature(null);
+				showSummaryPanel();
+			});
 
 		let tree;
 		try {
-			tree = await scanLibrary();
+			const results = await Promise.all([scanLibrary(), loadPersistedState()]);
+			tree = results[0];
 		} catch (e) {
 			console.error('nomadtracks:', e);
 			showToast(tr('Could not read your files. See the browser console for details.'));
@@ -1376,8 +2238,21 @@
 		}
 		if (tree === null) {
 			showEmptyState();
+			// A GPX opened from the Files app still works without a
+			// library; the empty-state overlay makes way for the map.
+			await new Promise(function (resolve) {
+				if (mapReady) {
+					resolve();
+				} else {
+					map.on('load', resolve);
+				}
+			});
+			if (await openRequestedFile()) {
+				document.getElementById('nomadtracks-empty').hidden = true;
+			}
 			return;
 		}
+		applyPersistedState();
 		renderTree(tree);
 		updateFooter();
 
@@ -1397,17 +2272,38 @@
 			}
 		});
 		await waitForMap;
-		await NT.dav.mapLimit(items.poi, FETCH_CONCURRENCY, loadPoi);
+		// Everything the user left ticked last time comes back: shown
+		// POIs first (cheap), then the shown tracks.
+		await NT.dav.mapLimit(items.poi.filter(function (p) {
+			return p.checked;
+		}), FETCH_CONCURRENCY, loadPoi);
+		const restoredTracks = items.track.filter(function (t) {
+			return t.checked;
+		});
+		if (restoredTracks.length > 0) {
+			await setTracksShown(restoredTracks, true);
+		}
+		updateFolderBoxes();
 
 		if (!userMovedMap) {
 			const b = new maplibregl.LngLatBounds();
 			for (const poi of items.poi) {
-				if (poi.loaded) {
+				if (poi.loaded && poi.checked) {
 					b.extend([poi.poi.lon, poi.poi.lat]);
+				}
+			}
+			for (const track of items.track) {
+				if (track.loaded && track.checked) {
+					for (const seg of track.segments) {
+						for (const c of seg) {
+							b.extend(c);
+						}
+					}
 				}
 			}
 			fitBounds(b);
 		}
+		await openRequestedFile();
 	}
 
 	if (document.readyState === 'loading') {

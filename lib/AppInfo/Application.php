@@ -9,6 +9,8 @@ declare(strict_types=1);
 
 namespace OCA\NomadTracks\AppInfo;
 
+use OCA\Files\Event\LoadAdditionalScriptsEvent;
+use OCA\NomadTracks\Listener\LoadAdditionalScriptsListener;
 use OCP\AppFramework\App;
 use OCP\AppFramework\Bootstrap\IBootContext;
 use OCP\AppFramework\Bootstrap\IBootstrap;
@@ -22,8 +24,13 @@ class Application extends App implements IBootstrap {
 	}
 
 	public function register(IRegistrationContext $context): void {
-		// Nothing to register: the app is a single page that talks to
-		// the standard files WebDAV endpoint from the browser.
+		// The map page itself needs nothing here: it talks to the
+		// standard files WebDAV endpoint from the browser. This only
+		// hooks the "Open in NomadTracks" action into the Files app.
+		$context->registerEventListener(
+			LoadAdditionalScriptsEvent::class,
+			LoadAdditionalScriptsListener::class,
+		);
 	}
 
 	public function boot(IBootContext $context): void {

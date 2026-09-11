@@ -88,6 +88,54 @@ details.nt-folder > summary {
 	font-weight: 500;
 }
 
+details.nt-folder > summary > .nt-folder-name {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+/* Select-all boxes live inside <summary>; keep them on one line with
+   the disclosure marker and the name. */
+.nt-root > summary,
+details.nt-folder > summary {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	min-width: 0;
+}
+
+.nt-root > summary::before,
+details.nt-folder > summary::before {
+	content: '';
+	flex: none;
+	width: 0;
+	height: 0;
+	border-style: solid;
+	border-width: 4px 0 4px 6px;
+	border-color: transparent transparent transparent currentColor;
+	opacity: 0.6;
+	transition: transform 0.12s ease;
+}
+
+.nt-root[open] > summary::before,
+details.nt-folder[open] > summary::before {
+	transform: rotate(90deg);
+}
+
+.nt-root > summary::-webkit-details-marker,
+details.nt-folder > summary::-webkit-details-marker {
+	display: none;
+}
+
+.nt-root > summary,
+details.nt-folder > summary {
+	list-style: none;
+}
+
+.nt-check-folder {
+	margin: 0;
+}
+
 details.nt-folder > summary:hover {
 	background-color: var(--color-background-hover);
 }
@@ -422,6 +470,10 @@ details.nt-folder > summary:hover {
 	opacity: 0.85;
 }
 
+#nomadtracks-summary {
+	align-self: flex-start;
+}
+
 /* ---- map area ---- */
 
 #nomadtracks-main {
@@ -504,6 +556,31 @@ details.nt-folder > summary:hover {
 .nt-maptype .nt-maptype-button.nt-maptype-active {
 	background-color: var(--color-primary-element, #0082c9);
 	color: var(--color-primary-element-text, #fff);
+}
+
+.maplibregl-ctrl-group .nt-arrows-button {
+	width: 29px;
+	height: 29px;
+	margin: 0;
+	padding: 0;
+	border: none;
+	background-color: var(--color-main-background);
+	color: var(--color-main-text);
+	cursor: pointer;
+}
+
+.maplibregl-ctrl-group .nt-arrows-button:hover {
+	background-color: var(--color-background-hover);
+}
+
+.maplibregl-ctrl-group .nt-arrows-button.nt-arrows-active {
+	background-color: var(--color-primary-element, #0082c9);
+	color: var(--color-primary-element-text, #fff);
+}
+
+.nt-arrows-glyph {
+	font-size: 15px;
+	line-height: 29px;
 }
 
 /* ---- details panel ---- */
@@ -715,4 +792,63 @@ details.nt-folder > summary:hover {
 	.nt-stats {
 		grid-template-columns: minmax(0, 1fr);
 	}
+}
+
+/* ---- selection summary + logbook ---- */
+
+.nt-selection {
+	border-top: 1px solid var(--color-border);
+	padding-top: 10px;
+}
+
+.nt-categories {
+	list-style: none;
+	margin: 8px 0 0;
+	padding: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+}
+
+.nt-categories li {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.nt-logbook {
+	margin-top: 12px;
+	padding: 10px;
+	border-radius: var(--border-radius-large, 10px);
+	background-color: var(--color-background-hover);
+}
+
+.nt-logbook h4 {
+	margin: 0 0 4px;
+	font-size: 0.95em;
+}
+
+.nt-logbook .nt-hint {
+	margin: 0 0 8px;
+	font-size: 0.85em;
+	color: var(--color-text-maxcontrast);
+}
+
+.nt-logbook-fields {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	margin-bottom: 8px;
+}
+
+.nt-logbook-fields input {
+	width: 100%;
+	box-sizing: border-box;
+	margin: 0;
+}
+
+.nt-logbook-actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
 }

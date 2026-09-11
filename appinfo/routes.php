@@ -10,5 +10,8 @@ declare(strict_types=1);
 return [
 	'routes' => [
 		['name' => 'page#index', 'url' => '/', 'verb' => 'GET'],
+		// The user's shown-on-map selection (see StateController).
+		['name' => 'state#get', 'url' => '/state', 'verb' => 'GET'],
+		['name' => 'state#set', 'url' => '/state', 'verb' => 'PUT'],
 	],
 ];
