@@ -34,6 +34,7 @@
 	};
 	const MAP_TYPE_STORAGE_KEY = 'nomadtracks-map-type';
 	const SIDEBAR_WIDTH_STORAGE_KEY = 'nomadtracks-sidebar-width';
+	const OPEN_FOLDERS_STORAGE_KEY = 'nomadtracks-open-folders';
 	const SIDEBAR_DEFAULT_WIDTH = 300;
 	const SIDEBAR_MIN_WIDTH = 200;
 	const ARROWS_STORAGE_KEY = 'nomadtracks-arrows';
@@ -151,7 +152,7 @@
 			// what they want to look at.
 			const section = document.createElement('details');
 			section.className = 'nt-root';
-			section.open = false;
+			rememberOpenState(section, rootNode.kind);
 			const summary = document.createElement('summary');
 			if (hasVisibilityToggle(rootNode.kind)) {
 				summary.appendChild(makeFolderBox(rootNode, rootNode.kind));
@@ -160,10 +161,63 @@
 			h.textContent = rootNode.name + ' (' + countItems(rootNode) + ')';
 			summary.appendChild(h);
 			section.appendChild(summary);
-			section.appendChild(renderFolderContents(rootNode, rootNode.kind));
+			section.appendChild(renderFolderContents(rootNode, rootNode.kind, rootNode.kind));
 			container.appendChild(section);
 		}
 		updateFolderBoxes();
+	}
+
+	// ---- folder open / closed state (per browser) -------------------
+
+	let openFolders = null;
+
+	function loadOpenFolders() {
+		if (openFolders) {
+			return openFolders;
+		}
+		openFolders = new Set();
+		try {
+			const raw = window.localStorage.getItem(OPEN_FOLDERS_STORAGE_KEY);
+			const list = raw ? JSON.parse(raw) : [];
+			if (Array.isArray(list)) {
+				for (const key of list) {
+					if (typeof key === 'string') {
+						openFolders.add(key);
+					}
+				}
+			}
+		} catch (e) {
+			// Everything starts collapsed, as before.
+		}
+		return openFolders;
+	}
+
+	function saveOpenFolders() {
+		try {
+			window.localStorage.setItem(OPEN_FOLDERS_STORAGE_KEY,
+				JSON.stringify(Array.from(loadOpenFolders())));
+		} catch (e) {
+			// Not fatal.
+		}
+	}
+
+	/**
+	 * Apply the remembered state to a <details> and keep following
+	 * it. `key` is the folder's path within its root ("track",
+	 * "track/Test 1/Subfolder4", …). The toggle event also fires for
+	 * programmatic changes, so revealItem() is covered too.
+	 */
+	function rememberOpenState(details, key) {
+		details.open = loadOpenFolders().has(key);
+		details.addEventListener('toggle', function () {
+			const set = loadOpenFolders();
+			if (details.open) {
+				set.add(key);
+			} else {
+				set.delete(key);
+			}
+			saveOpenFolders();
+		});
 	}
 
 	/** Tracks and POIs can be shown / hidden; maps and routes cannot. */
@@ -235,13 +289,14 @@
 		return n;
 	}
 
-	function renderFolderContents(node, kind) {
+	function renderFolderContents(node, kind, prefix) {
 		const wrap = document.createElement('div');
 		wrap.className = 'nt-children';
 		for (const folder of node.folders) {
+			const folderKey = (prefix || kind) + '/' + folder.name;
 			const details = document.createElement('details');
-			details.open = false;
 			details.className = 'nt-folder';
+			rememberOpenState(details, folderKey);
 			const summary = document.createElement('summary');
 			if (hasVisibilityToggle(kind)) {
 				summary.appendChild(makeFolderBox(folder, kind));
@@ -252,7 +307,7 @@
 			name.title = folder.name;
 			summary.appendChild(name);
 			details.appendChild(summary);
-			details.appendChild(renderFolderContents(folder, kind));
+			details.appendChild(renderFolderContents(folder, kind, folderKey));
 			wrap.appendChild(details);
 		}
 		for (const item of node.items) {
