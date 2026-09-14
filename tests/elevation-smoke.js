@@ -106,9 +106,12 @@ ok(
 	);
 }
 
+// Without a time base (window 0) the travel floor is the whole
+// window: each side widens until it spans 30 m, which on samples 10 m
+// apart is three neighbours each way — the ends see fewer.
 ok(
-	'a non-positive window is a pass-through',
-	S.medianSmoothed([1, 2, 3], [0, 1, 2], [0, 100, 200], 0).join(',') === '1,2,3'
+	'a non-positive window means the travel floor alone',
+	S.medianSmoothed([1, 2, 3, 4, 5], [0, 1, 2, 3, 4], [0, 10, 20, 30, 40], 0).join(',') === '2.5,3,3,3,3.5'
 );
 
 // medianResidual: |raw − smoothed| = 0,0,30,0,0 → median 0.
@@ -416,6 +419,43 @@ const fixtures = {
 		'…while the same rise across 1.4 km of walking is kept',
 		moved.gain > 3.5,
 		fmt(moved.gain) + ' m'
+	);
+}
+
+// (k) F1: an import without `<time>` carries one and the same
+//     timestamp on every point (the app's parser stamps the import
+//     instant once). The filter must then measure over ground and
+//     land where the timed recording lands, instead of flattening
+//     the whole file inside one 18 s window.
+{
+	const timed = [];
+	for (let i = 0; i < 300; i++) {
+		timed.push(pt(i, 6, 1000 + i * 0.3, i * 6));
+	}
+	const untimed = timed.map(function (p) {
+		return { lat: p.lat, lon: p.lon, altitude: p.altitude, timestamp: 1720000000 };
+	});
+	const a = S.elevationStats(timed).gain;
+	const b = S.elevationStats(untimed).gain;
+	ok(
+		'a 90 m climb without timestamps is measured over ground',
+		b > 80 && Math.abs(a - b) < 10,
+		'untimed ' + fmt(b) + ' m vs timed ' + fmt(a) + ' m'
+	);
+}
+
+// (l) F4: fewer than two usable samples is no data, not "use the
+//     rejected ones instead".
+{
+	const junk = [];
+	for (let i = 0; i < 50; i++) {
+		junk.push(pt(i, 5, 500 + i * 2, i * 5, 99));
+	}
+	const r = S.elevationStats(junk);
+	ok(
+		'all-rejected input reports no elevation and no state',
+		r.gain === 0 && r.loss === 0 && r.reference === null,
+		'gain ' + fmt(r.gain) + ' m'
 	);
 }
 

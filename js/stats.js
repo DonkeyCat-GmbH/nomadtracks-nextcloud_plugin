@@ -118,12 +118,12 @@
 	 * `medianTravelFloorMeters` of `travel` (cumulative horizontal
 	 * distance, non-decreasing) — or hits the end of the series, or
 	 * `maximumTravelWindowSeconds`. Two-pointer sweep for the time
-	 * bounds, exactly as in the Swift original; `windowSeconds <= 0`
-	 * is a pass-through.
+	 * bounds, exactly as in the Swift original; with `windowSeconds <= 0`
+	 * (no time base) the window is the travel floor alone.
 	 */
 	function medianSmoothed(altitudes, timestamps, travel, windowSeconds) {
 		const n = altitudes.length;
-		if (n === 0 || !(windowSeconds > 0)) {
+		if (n === 0) {
 			return altitudes.slice();
 		}
 		const half = windowSeconds / 2;
@@ -133,16 +133,22 @@
 		let lo = 0;
 		let hi = 0;
 		for (let i = 0; i < n; i++) {
-			const lower = timestamps[i] - half;
-			const upper = timestamps[i] + half;
-			while (lo < n && timestamps[lo] < lower) {
-				lo++;
-			}
-			if (hi < lo) {
-				hi = lo;
-			}
-			while (hi < n && timestamps[hi] <= upper) {
-				hi++;
+			if (windowSeconds > 0) {
+				const lower = timestamps[i] - half;
+				const upper = timestamps[i] + half;
+				while (lo < n && timestamps[lo] < lower) {
+					lo++;
+				}
+				if (hi < lo) {
+					hi = lo;
+				}
+				while (hi < n && timestamps[hi] <= upper) {
+					hi++;
+				}
+			} else {
+				// No time base: the sample alone, widened by travel.
+				lo = i;
+				hi = i + 1;
 			}
 			if (hi <= lo) {
 				out[i] = altitudes[i];
@@ -199,7 +205,7 @@
 		// "known" when strictly positive (CoreLocation reports a
 		// negative value with no altitude fix; GPX has none at all),
 		// so the gate never rejects imported data.
-		let kept = [];
+		const kept = [];
 		for (let i = 0; i < points.length; i++) {
 			const acc = typeof points[i].verticalAccuracy === 'number'
 				? points[i].verticalAccuracy
@@ -209,10 +215,16 @@
 			}
 			kept.push(i);
 		}
-		// Gate left too little to work with → fall back to the ungated
-		// signal rather than report a spurious zero.
+		// Fewer than two usable samples is NO elevation data — not a
+		// licence to use the rejected ones (F4, review of 2026-09-14).
 		if (kept.length < 2) {
-			kept = points.map(function (_, i) { return i; });
+			return {
+				timestamps: [],
+				travel: [],
+				smoothed: [],
+				keptIndices: [],
+				effectiveThreshold: threshold,
+			};
 		}
 		const altitudes = kept.map(function (i) { return points[i].altitude; });
 		const timestamps = kept.map(function (i) { return points[i].timestamp; });
@@ -236,11 +248,17 @@
 		// widened so it always holds `minimumSamplesPerWindow` samples
 		// whatever the cadence; the travel floor is applied per sample
 		// inside medianSmoothed.
+		// A cadence of 0 means no usable time base (an import without
+		// `<time>`, stamped with one and the same instant): the median
+		// then spans ground only — the travel floor is the whole window
+		// (F1, review of 2026-09-14).
 		const cadence = medianSampleInterval(timestamps);
-		const windowSeconds = Math.max(
-			Math.max(0, timeConstantSeconds),
-			cadence * ELEVATION_DEFAULTS.minimumSamplesPerWindow
-		);
+		const windowSeconds = cadence > 0
+			? Math.max(
+				Math.max(0, timeConstantSeconds),
+				cadence * ELEVATION_DEFAULTS.minimumSamplesPerWindow
+			)
+			: 0;
 		const smoothed = medianSmoothed(altitudes, timestamps, travel, windowSeconds);
 
 		// Stage 3a — stand the deadband off the noise the smoothing
@@ -284,16 +302,10 @@
 		if (!points || points.length === 0) {
 			return { gain: 0, loss: 0, reference: null, smoothed: null, lastTimestamp: null };
 		}
-		const firstPoint = points[0];
 		const prepared = prepareElevation(points, threshold, timeConstantSeconds);
+		// Fewer than two usable samples: no elevation data, no state.
 		if (prepared.smoothed.length === 0) {
-			return {
-				gain: 0,
-				loss: 0,
-				reference: firstPoint.altitude,
-				smoothed: firstPoint.altitude,
-				lastTimestamp: firstPoint.timestamp,
-			};
+			return { gain: 0, loss: 0, reference: null, smoothed: null, lastTimestamp: null };
 		}
 
 		// Stages 3 + 4 — hysteresis with the grade gate on the smoothed
