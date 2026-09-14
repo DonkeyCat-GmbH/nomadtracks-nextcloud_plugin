@@ -66,8 +66,8 @@ placeholder.
 
 Elevation gain and loss are computed with a JavaScript port of the
 app's own `ElevationStats` filter — vertical-accuracy gate,
-cadence-widened time-windowed median, threshold hysteresis with a
-noise-scaled deadband — so the figures match what the app shows for
+time-and-travel-windowed median, threshold hysteresis with a
+noise-scaled deadband, grade plausibility gate — so the figures match what the app shows for
 the same track rather than the much larger number a naive sum of
 positive altitude deltas would give. `tests/elevation-smoke.js`
 (`node tests/elevation-smoke.js`) checks that port, including against

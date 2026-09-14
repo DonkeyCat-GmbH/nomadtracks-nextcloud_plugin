@@ -8,8 +8,8 @@
  *
  *   - `elevationStats(points)`  ← NomadTracksShared/ElevationStats.swift
  *     (`ElevationStats.computeWithReference`): vertical-accuracy gate →
- *     cadence-widened time-windowed median → threshold hysteresis with a
- *     noise-scaled deadband.
+ *     time-and-travel-windowed median → threshold hysteresis with a
+ *     noise-scaled deadband → grade plausibility gate.
  *   - `trackStats(...)`         ← NomadTracks/Models/TrackStats.swift
  *     (`TrackStats.compute`): max / average / average-moving speed,
  *     moving time, altitude extremes, heart-rate aggregates.
@@ -47,6 +47,28 @@
 		noiseDeadbandFactor: 2,
 		/** Samples with a real accuracy worse than this are dropped. */
 		maxVerticalAccuracyMeters: 15,
+		/**
+		 * Each side of the median window must also span this much
+		 * horizontal travel, so at a rest stop the median spans the
+		 * stop instead of following the slow wander of a GPS-only
+		 * altitude fix (the 904 m-for-342 m recording of 2026-09-14).
+		 */
+		medianTravelFloorMeters: 30,
+		/** …but the travel floor never widens a side beyond this. */
+		maximumTravelWindowSeconds: 300,
+		/**
+		 * Steepest step the hysteresis commits: |Δaltitude| beyond the
+		 * deadband per metre of travel since the altitude left the
+		 * reference level. Steeper is the fix moving on its own;
+		 * dropped, reference advanced anyway.
+		 */
+		maximumPlausibleGrade: 0.5,
+		/**
+		 * The grade baseline starts at the last sample still within
+		 * this fraction of the deadband of the reference — where the
+		 * altitude had not yet started moving.
+		 */
+		anchorBandFraction: 0.25,
 	};
 
 	function ascending(a, b) {
@@ -91,16 +113,22 @@
 
 	/**
 	 * Replaces each altitude with the median of every sample whose
-	 * timestamp falls within ±windowSeconds/2 of it. Two-pointer sweep,
-	 * exactly as in the Swift original; `windowSeconds <= 0` is a
-	 * pass-through.
+	 * timestamp falls within ±windowSeconds/2 of it, the window then
+	 * widened outward until each side also spans
+	 * `medianTravelFloorMeters` of `travel` (cumulative horizontal
+	 * distance, non-decreasing) — or hits the end of the series, or
+	 * `maximumTravelWindowSeconds`. Two-pointer sweep for the time
+	 * bounds, exactly as in the Swift original; `windowSeconds <= 0`
+	 * is a pass-through.
 	 */
-	function medianSmoothed(altitudes, timestamps, windowSeconds) {
+	function medianSmoothed(altitudes, timestamps, travel, windowSeconds) {
 		const n = altitudes.length;
 		if (n === 0 || !(windowSeconds > 0)) {
 			return altitudes.slice();
 		}
 		const half = windowSeconds / 2;
+		const travelFloor = ELEVATION_DEFAULTS.medianTravelFloorMeters;
+		const cap = ELEVATION_DEFAULTS.maximumTravelWindowSeconds;
 		const out = new Array(n);
 		let lo = 0;
 		let hi = 0;
@@ -120,7 +148,21 @@
 				out[i] = altitudes[i];
 				continue;
 			}
-			const window = altitudes.slice(lo, hi).sort(ascending);
+			// Travel floor: widen each side until it covers enough
+			// ground, stopping at the cap.
+			let wlo = lo;
+			while (wlo > 0
+				&& travel[i] - travel[wlo] < travelFloor
+				&& timestamps[i] - timestamps[wlo - 1] <= cap) {
+				wlo--;
+			}
+			let whi = hi;
+			while (whi < n
+				&& travel[whi - 1] - travel[i] < travelFloor
+				&& timestamps[whi] - timestamps[i] <= cap) {
+				whi++;
+			}
+			const window = altitudes.slice(wlo, whi).sort(ascending);
 			const m = window.length;
 			out[i] = m % 2 === 1
 				? window[(m - 1) / 2]
@@ -130,12 +172,102 @@
 	}
 
 	/**
-	 * Elevation gain / loss through the app's three-stage filter.
+	 * Stage 4 — how much of a hysteresis step `delta` (already past the
+	 * deadband) to commit, given the horizontal distance `travelled`
+	 * since the last sample still at the reference level: all of it when the ground can
+	 * explain it, none of it otherwise. The deadband-sized part of the
+	 * step is exempt from the grade test (the smoothed signal still
+	 * carries that much noise, and a genuinely steep trail commits a
+	 * step every few metres); stationary wander is several deadbands
+	 * tall over a metre or two of scatter and stays out.
+	 */
+	function plausibleStep(delta, travelled, deadband) {
+		const step = Math.abs(delta);
+		return step - deadband <= ELEVATION_DEFAULTS.maximumPlausibleGrade * travelled
+			? step
+			: 0;
+	}
+
+	/**
+	 * Stages 1–3a of the filter, shared by `elevationStats` and (in
+	 * the app) the cumulative walk: the kept samples' timestamps and
+	 * cumulative horizontal travel, the smoothed altitude series and
+	 * the deadband stood off the measured noise.
+	 */
+	function prepareElevation(points, threshold, timeConstantSeconds) {
+		// Stage 1 — vertical-accuracy gate. An accuracy is only
+		// "known" when strictly positive (CoreLocation reports a
+		// negative value with no altitude fix; GPX has none at all),
+		// so the gate never rejects imported data.
+		let kept = [];
+		for (let i = 0; i < points.length; i++) {
+			const acc = typeof points[i].verticalAccuracy === 'number'
+				? points[i].verticalAccuracy
+				: -1;
+			if (acc > 0 && acc > ELEVATION_DEFAULTS.maxVerticalAccuracyMeters) {
+				continue;
+			}
+			kept.push(i);
+		}
+		// Gate left too little to work with → fall back to the ungated
+		// signal rather than report a spurious zero.
+		if (kept.length < 2) {
+			kept = points.map(function (_, i) { return i; });
+		}
+		const altitudes = kept.map(function (i) { return points[i].altitude; });
+		const timestamps = kept.map(function (i) { return points[i].timestamp; });
+
+		// Horizontal travel along the KEPT samples only, so a point the
+		// gate dropped is invisible to every later stage. A point
+		// without coordinates contributes no travel.
+		const travel = new Array(kept.length);
+		travel[0] = 0;
+		for (let i = 1; i < kept.length; i++) {
+			const a = points[kept[i - 1]];
+			const b = points[kept[i]];
+			const d = Number.isFinite(a.lat) && Number.isFinite(a.lon)
+				&& Number.isFinite(b.lat) && Number.isFinite(b.lon)
+				? distance(a, b)
+				: 0;
+			travel[i] = travel[i - 1] + d;
+		}
+
+		// Stage 2 — time-and-travel-windowed median, the time window
+		// widened so it always holds `minimumSamplesPerWindow` samples
+		// whatever the cadence; the travel floor is applied per sample
+		// inside medianSmoothed.
+		const cadence = medianSampleInterval(timestamps);
+		const windowSeconds = Math.max(
+			Math.max(0, timeConstantSeconds),
+			cadence * ELEVATION_DEFAULTS.minimumSamplesPerWindow
+		);
+		const smoothed = medianSmoothed(altitudes, timestamps, travel, windowSeconds);
+
+		// Stage 3a — stand the deadband off the noise the smoothing
+		// could not explain. Zero on a clean recording, so the 0.5 m
+		// floor applies unchanged there.
+		const effectiveThreshold = Math.max(
+			threshold,
+			ELEVATION_DEFAULTS.noiseDeadbandFactor * medianResidual(altitudes, smoothed)
+		);
+		return {
+			timestamps: timestamps,
+			travel: travel,
+			smoothed: smoothed,
+			keptIndices: kept,
+			effectiveThreshold: effectiveThreshold,
+		};
+	}
+
+	/**
+	 * Elevation gain / loss through the app's four-stage filter
+	 * (vertical-accuracy gate → time-and-travel-windowed median →
+	 * noise-scaled threshold hysteresis → grade plausibility gate).
 	 *
-	 * `points` is an array of `{ altitude, timestamp, verticalAccuracy }`
-	 * (seconds for the timestamp; `verticalAccuracy` may be omitted —
-	 * GPX carries none, and the gate only ever fires on a real,
-	 * positive accuracy estimate, exactly like the app).
+	 * `points` is an array of `{ lat, lon, altitude, timestamp,
+	 * verticalAccuracy }` (seconds for the timestamp; `verticalAccuracy`
+	 * may be omitted — GPX carries none, and the gate only ever fires
+	 * on a real, positive accuracy estimate, exactly like the app).
 	 *
 	 * Returns `{ gain, loss, reference, smoothed, lastTimestamp }` in
 	 * metres, mirroring `ElevationStats.computeWithReference`.
@@ -153,48 +285,8 @@
 			return { gain: 0, loss: 0, reference: null, smoothed: null, lastTimestamp: null };
 		}
 		const firstPoint = points[0];
-
-		// Stage 1 — vertical-accuracy gate. An accuracy is only
-		// "known" when strictly positive (CoreLocation reports a
-		// negative value with no altitude fix; GPX has none at all),
-		// so the gate never rejects imported data.
-		let altitudes = [];
-		let timestamps = [];
-		for (let i = 0; i < points.length; i++) {
-			const acc = typeof points[i].verticalAccuracy === 'number'
-				? points[i].verticalAccuracy
-				: -1;
-			if (acc > 0 && acc > ELEVATION_DEFAULTS.maxVerticalAccuracyMeters) {
-				continue;
-			}
-			altitudes.push(points[i].altitude);
-			timestamps.push(points[i].timestamp);
-		}
-		// Gate left too little to work with → fall back to the ungated
-		// signal rather than report a spurious zero.
-		if (altitudes.length < 2) {
-			altitudes = points.map(function (p) { return p.altitude; });
-			timestamps = points.map(function (p) { return p.timestamp; });
-		}
-
-		// Stage 2 — time-windowed median, widened so the window always
-		// holds `minimumSamplesPerWindow` samples whatever the cadence.
-		const cadence = medianSampleInterval(timestamps);
-		const windowSeconds = Math.max(
-			Math.max(0, timeConstantSeconds),
-			cadence * ELEVATION_DEFAULTS.minimumSamplesPerWindow
-		);
-		const smoothedSeries = medianSmoothed(altitudes, timestamps, windowSeconds);
-
-		// Stage 3a — stand the deadband off the noise the smoothing
-		// could not explain. Zero on a clean recording, so the 0.5 m
-		// floor applies unchanged there.
-		const effectiveThreshold = Math.max(
-			threshold,
-			ELEVATION_DEFAULTS.noiseDeadbandFactor * medianResidual(altitudes, smoothedSeries)
-		);
-
-		if (smoothedSeries.length === 0) {
+		const prepared = prepareElevation(points, threshold, timeConstantSeconds);
+		if (prepared.smoothed.length === 0) {
 			return {
 				gain: 0,
 				loss: 0,
@@ -204,26 +296,41 @@
 			};
 		}
 
-		// Stage 3b — threshold hysteresis on the smoothed signal.
-		let reference = smoothedSeries[0];
-		let smoothed = smoothedSeries[0];
-		let lastTimestamp = timestamps[0];
+		// Stages 3 + 4 — hysteresis with the grade gate on the smoothed
+		// signal. Inside ±threshold the sample is noise: do not commit
+		// and do NOT advance the reference, so a sustained drift keeps
+		// building toward the threshold across samples.
+		let reference = prepared.smoothed[0];
+		let anchorTravel = prepared.travel[0];
+		let smoothed = prepared.smoothed[0];
+		let lastTimestamp = prepared.timestamps[0];
 		let gain = 0;
 		let loss = 0;
-		for (let i = 1; i < smoothedSeries.length; i++) {
-			smoothed = smoothedSeries[i];
-			lastTimestamp = timestamps[i];
+		for (let i = 1; i < prepared.smoothed.length; i++) {
+			smoothed = prepared.smoothed[i];
+			lastTimestamp = prepared.timestamps[i];
 			const delta = smoothed - reference;
-			if (delta >= effectiveThreshold) {
-				gain += delta;
-				reference = smoothed;
-			} else if (delta <= -effectiveThreshold) {
-				loss += -delta;
-				reference = smoothed;
+			if (Math.abs(delta) < prepared.effectiveThreshold) {
+				// The anchor follows while the sample is still AT the
+				// reference level, so the ground covered since it is
+				// the ground over which the altitude actually changed.
+				if (Math.abs(delta) < ELEVATION_DEFAULTS.anchorBandFraction * prepared.effectiveThreshold) {
+					anchorTravel = prepared.travel[i];
+				}
+				continue;
 			}
-			// Inside ±threshold the sample is noise: do not commit and
-			// do NOT advance the reference, so a sustained drift keeps
-			// building toward the threshold across samples.
+			const step = plausibleStep(
+				delta,
+				prepared.travel[i] - anchorTravel,
+				prepared.effectiveThreshold
+			);
+			if (delta > 0) {
+				gain += step;
+			} else {
+				loss += step;
+			}
+			reference = smoothed;
+			anchorTravel = prepared.travel[i];
 		}
 		return {
 			gain: gain,
@@ -464,6 +571,7 @@
 		medianSmoothed: medianSmoothed,
 		medianSampleInterval: medianSampleInterval,
 		medianResidual: medianResidual,
+		prepareElevation: prepareElevation,
 		distance: distance,
 		totalDistance: totalDistance,
 		cumulativeDistance: cumulativeDistance,
