@@ -1,0 +1,5 @@
+# Local deploy helper (per-developer, not part of the app)
+deploy.sh
+
+# macOS
+.DS_Store
