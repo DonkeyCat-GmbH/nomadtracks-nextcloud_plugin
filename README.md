@@ -7,6 +7,8 @@ NomadTracks for
 [iOS](https://apps.apple.com/app/id6764303399) ·
 [Android](https://play.google.com/store/apps/details?id=com.mcw.nomadtracks)
 
+![NomadTracks for Nextcloud](screenshot.jpg)
+
 ## What it does
 
 - Folder tree of your synced tracks, POIs, routes and custom maps;
