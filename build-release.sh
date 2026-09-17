@@ -4,7 +4,7 @@
 #   build/nomadtracks-<version>.tar.gz   (top-level folder "nomadtracks")
 #
 # Then sign it (needs the app-store certificate key, see README):
-#   openssl dgst -sha512 -sign ~/.nextcloud/certificates/nomadtracks.key \
+#   openssl dgst -sha512 -sign .certificates/nomadtracks.key \
 #       build/nomadtracks-<version>.tar.gz | openssl base64
 #
 set -euo pipefail
@@ -29,4 +29,4 @@ COPYFILE_DISABLE=1 tar -C "$STAGE" -czf "$ARCHIVE" "$APP_ID"
 echo "built $ARCHIVE ($(du -h "$ARCHIVE" | cut -f1))"
 echo
 echo "sign with:"
-echo "  openssl dgst -sha512 -sign ~/.nextcloud/certificates/$APP_ID.key '$ARCHIVE' | openssl base64"
+echo "  openssl dgst -sha512 -sign .certificates/$APP_ID.key '$ARCHIVE' | openssl base64"

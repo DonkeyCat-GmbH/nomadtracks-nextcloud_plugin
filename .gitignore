@@ -4,3 +4,4 @@ deploy.sh
 # macOS
 .DS_Store
 build/
+.certificates/
