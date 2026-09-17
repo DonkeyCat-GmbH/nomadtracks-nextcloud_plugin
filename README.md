@@ -65,6 +65,11 @@ Defined by NomadTracks sync schema v1.
 | `Routes/**/*.nomadroute` | `NMDRTE01` package (embedded GPX) | route line + stops |
 | `Maps/**/*.nomadmap` | `NMDMAP01` package | listed only |
 
+## Release
+
+`./build-release.sh` builds `build/nomadtracks-<version>.tar.gz` for the
+App Store and prints the signing command.
+
 ## Tests
 
 ```sh
