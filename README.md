@@ -1,7 +1,11 @@
 # NomadTracks for Nextcloud
 
-Shows the library that the NomadTracks mobile app (iOS / Android) syncs
-into the `NomadTracks/` folder of your Nextcloud files on a map.
+Shows the library that the NomadTracks mobile app syncs into the
+`NomadTracks/` folder of your Nextcloud files on a map.
+
+NomadTracks for
+[iOS](https://apps.apple.com/app/id6764303399) ·
+[Android](https://play.google.com/store/apps/details?id=com.mcw.nomadtracks)
 
 ## What it does
 
@@ -19,8 +23,7 @@ into the `NomadTracks/` folder of your Nextcloud files on a map.
 
 Read-only: the app never writes to the synced files. Everything is
 read in the browser through Nextcloud's own WebDAV endpoint — no
-server-side parsing, no extra database. The base map comes from
-`map.nomadtracks.app`; your track data never leaves your Nextcloud.
+server-side parsing, no extra database.
 
 ## Requirements
 
