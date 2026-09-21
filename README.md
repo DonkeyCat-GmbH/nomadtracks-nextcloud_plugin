@@ -29,7 +29,7 @@ server-side parsing, no extra database.
 
 ## Requirements
 
-- Nextcloud 28 – 34.
+- Nextcloud 28 – 35.
 - A library synced by the NomadTracks app into `NomadTracks/` at the
   root of the user's files.
 
